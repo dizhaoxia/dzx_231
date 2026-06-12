@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Layout, Menu, Button, Typography, Badge } from 'antd'
+import React from 'react'
+import { Layout, Menu, Button, Typography } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   BookOutlined,
@@ -41,11 +41,7 @@ function StudentLayout() {
     {
       key: '/student/wrong',
       icon: <FormOutlined />,
-      label: (
-        <Badge count={wrongQuestions.length} size="small" offset={[8, 0]}>
-          错题本
-        </Badge>
-      )
+      label: wrongQuestions.length > 0 ? `错题本 (${wrongQuestions.length})` : '错题本'
     },
     {
       key: '/student/statistics',
