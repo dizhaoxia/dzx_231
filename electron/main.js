@@ -2,6 +2,10 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const Store = require('electron-store')
 
+app.commandLine.appendSwitch('--no-sandbox')
+app.commandLine.appendSwitch('--disable-gpu')
+app.commandLine.appendSwitch('--disable-software-rasterizer')
+
 const store = new Store({
   name: 'quiz-data',
   defaults: {
@@ -97,7 +101,7 @@ function createWindow() {
   })
 
   if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadURL('http://localhost:5173')
+    mainWindow.loadURL('http://localhost:3000')
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
