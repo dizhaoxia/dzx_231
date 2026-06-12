@@ -20,7 +20,8 @@ import {
   Empty,
   Tooltip,
   Divider,
-  Alert
+  Alert,
+  Spin
 } from 'antd'
 import {
   ClockCircleOutlined,
@@ -75,6 +76,7 @@ function Exam() {
   const debounceRef = useRef(null)
   const [showRecovery, setShowRecovery] = useState(false)
   const [recoveredExam, setRecoveredExam] = useState(null)
+  const [checkingCache, setCheckingCache] = useState(true)
 
   const enabledCategories = getEnabledCategories()
 
@@ -87,17 +89,28 @@ function Exam() {
 
   useEffect(() => {
     const checkCache = async () => {
-      const exists = await hasCachedExam()
-      if (exists) {
-        const cached = await recoverCachedExam()
-        if (cached) {
-          setRecoveredExam(cached)
+      try {
+        if (currentExam && !currentExam.submitted) {
+          setRecoveredExam(currentExam)
           setShowRecovery(true)
+          setCheckingCache(false)
+          return
         }
+        const exists = await hasCachedExam()
+        if (exists) {
+          const cached = await recoverCachedExam()
+          if (cached) {
+            setRecoveredExam(cached)
+            setShowRecovery(true)
+          }
+        }
+      } catch (e) {
+        console.error('Check cache error:', e)
       }
+      setCheckingCache(false)
     }
     checkCache()
-  }, [hasCachedExam, recoverCachedExam])
+  }, [])
 
   useEffect(() => {
     if (examStarted && timeLeft > 0 && !examFinished) {
@@ -211,7 +224,7 @@ function Exam() {
         return
       }
 
-      startExam(questions, duration)
+      await startExam(questions, duration)
       setTimeLeft(duration * 60)
       setExamStarted(true)
       setExamFinished(false)
@@ -492,6 +505,18 @@ function Exam() {
             </>
           )}
         </div>
+      </div>
+    )
+  }
+
+  if (checkingCache) {
+    return (
+      <div className={styles.container}>
+        <Card className={styles.startCard}>
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Spin size="large" tip="检查考试记录..." />
+          </div>
+        </Card>
       </div>
     )
   }

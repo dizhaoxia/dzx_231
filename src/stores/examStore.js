@@ -16,7 +16,7 @@ export const useExamStore = create((set, get) => ({
     })
   },
 
-  startExam: (questions, duration) => {
+  startExam: async (questions, duration) => {
     const answers = {}
     const marked = {}
     questions.forEach(q => {
@@ -35,12 +35,12 @@ export const useExamStore = create((set, get) => ({
       halfTimeAlerted: false,
       fiveMinAlerted: false
     }
-    storage.set('currentExamCache', exam)
+    await storage.set('currentExamCache', exam)
     set({ currentExam: exam })
     return exam
   },
 
-  startWrongExam: (questions, duration) => {
+  startWrongExam: async (questions, duration) => {
     const answers = {}
     const marked = {}
     questions.forEach(q => {
@@ -60,7 +60,7 @@ export const useExamStore = create((set, get) => ({
       halfTimeAlerted: false,
       fiveMinAlerted: false
     }
-    storage.set('currentExamCache', exam)
+    await storage.set('currentExamCache', exam)
     set({ currentExam: exam })
     return exam
   },

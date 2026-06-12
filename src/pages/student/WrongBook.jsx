@@ -274,7 +274,7 @@ function WrongBook() {
         return
       }
 
-      startWrongExam(questionPool, duration)
+      await startWrongExam(questionPool, duration)
       setExamStarted(true)
       setExamFinished(false)
       setExamCurrentIndex(0)

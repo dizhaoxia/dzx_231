@@ -86,6 +86,52 @@ const store = new Store({
 
 let mainWindow
 
+const pendingWrites = {}
+let globalTimer = null
+const WRITE_DEBOUNCE_MS = 200
+
+function enqueueWrite(key, value) {
+  pendingWrites[key] = value
+  if (globalTimer) {
+    clearTimeout(globalTimer)
+  }
+  globalTimer = setTimeout(flushWrites, WRITE_DEBOUNCE_MS)
+}
+
+function flushWrites() {
+  const keys = Object.keys(pendingWrites)
+  if (keys.length === 0) return
+
+  const batch = {}
+  keys.forEach(k => {
+    batch[k] = pendingWrites[k]
+    delete pendingWrites[k]
+  })
+
+  try {
+    store.set(batch)
+  } catch (e) {
+    console.error('Store batch write error:', e)
+    keys.forEach(k => {
+      try {
+        store.set(k, batch[k])
+      } catch (e2) {
+        console.error('Store fallback write error:', e2)
+      }
+    })
+  }
+
+  globalTimer = null
+}
+
+function flushAllWrites() {
+  if (globalTimer) {
+    clearTimeout(globalTimer)
+    globalTimer = null
+  }
+  flushWrites()
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -108,6 +154,7 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    flushAllWrites()
     mainWindow = null
   })
 }
@@ -133,7 +180,12 @@ ipcMain.handle('get-store-data', (event, key) => {
 })
 
 ipcMain.handle('set-store-data', (event, key, value) => {
-  store.set(key, value)
+  enqueueWrite(key, value)
+  return true
+})
+
+ipcMain.handle('flush-store-data', () => {
+  flushAllWrites()
   return true
 })
 

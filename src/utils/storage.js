@@ -1,5 +1,36 @@
 const isElectron = window.electronAPI && typeof window.electronAPI.getStoreData === 'function'
 
+let writeQueue = []
+let writeInProgress = false
+
+async function processWriteQueue() {
+  if (writeInProgress || writeQueue.length === 0) return
+  writeInProgress = true
+
+  while (writeQueue.length > 0) {
+    const { key, value, resolve, reject } = writeQueue.shift()
+    if (isElectron) {
+      try {
+        await window.electronAPI.setStoreData(key, value)
+        resolve(true)
+      } catch (e) {
+        console.error('Electron storage set error:', e)
+        resolve(false)
+      }
+    } else {
+      try {
+        localStorage.setItem(key, JSON.stringify(value))
+        resolve(true)
+      } catch (e) {
+        console.error('LocalStorage set error:', e)
+        resolve(false)
+      }
+    }
+  }
+
+  writeInProgress = false
+}
+
 export const storage = {
   async get(key, defaultValue = null) {
     if (isElectron) {
@@ -22,23 +53,10 @@ export const storage = {
   },
 
   async set(key, value) {
-    if (isElectron) {
-      try {
-        await window.electronAPI.setStoreData(key, value)
-        return true
-      } catch (e) {
-        console.error('Electron storage set error:', e)
-        return false
-      }
-    } else {
-      try {
-        localStorage.setItem(key, JSON.stringify(value))
-        return true
-      } catch (e) {
-        console.error('LocalStorage set error:', e)
-        return false
-      }
-    }
+    return new Promise((resolve) => {
+      writeQueue.push({ key, value, resolve, reject: resolve })
+      processWriteQueue()
+    })
   },
 
   async getAll() {
