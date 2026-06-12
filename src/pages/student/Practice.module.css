@@ -1,0 +1,149 @@
+.layout {
+  height: 100%;
+  background: #f0f2f5;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sider {
+  background: white;
+  border-right: 1px solid #e8e8e8;
+}
+
+.siderTitle {
+  padding: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  border-bottom: 1px solid #f0f0f0;
+  color: #333;
+}
+
+.menu {
+  border-right: none;
+}
+
+.mainLayout {
+  display: flex;
+  flex-direction: column;
+}
+
+.content {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  background: #f0f2f5;
+}
+
+.empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.questionCard {
+  max-width: 800px;
+  margin: 0 auto;
+  border-radius: 8px;
+}
+
+.questionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.questionTitle {
+  margin-bottom: 24px !important;
+  line-height: 1.6 !important;
+}
+
+.optionsContainer {
+  margin-bottom: 24px;
+}
+
+.optionsGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.optionItem {
+  padding: 12px 16px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  transition: all 0.3s;
+  display: flex !important;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.optionItem:hover {
+  border-color: #1890ff;
+  background: #f0f7ff;
+}
+
+.optionLabel {
+  font-weight: 500;
+  color: #333;
+  flex-shrink: 0;
+}
+
+.optionText {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.correctOption {
+  border-color: #52c41a !important;
+  background: #f6ffed !important;
+}
+
+.wrongOption {
+  border-color: #ff4d4f !important;
+  background: #fff2f0 !important;
+}
+
+.resultSection {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.result {
+  padding: 24px 0 !important;
+}
+
+.explanation {
+  background: #fafafa;
+  padding: 16px;
+  border-radius: 6px;
+  margin-top: 16px;
+}
+
+.explanationText {
+  margin-bottom: 8px !important;
+  line-height: 1.6 !important;
+}
+
+.footer {
+  background: white;
+  padding: 16px 24px;
+  border-top: 1px solid #e8e8e8;
+}
+
+.footerContent {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.submitBtn {
+  min-width: 140px;
+}

@@ -1,0 +1,27 @@
+.container {
+  width: 100%;
+}
+
+.card {
+  border-radius: 8px;
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+
+.titleIcon {
+  color: #1890ff;
+  font-size: 20px;
+}
+
+.table {
+  margin-top: 16px;
+}
+
+.form {
+  margin-top: 20px;
+}

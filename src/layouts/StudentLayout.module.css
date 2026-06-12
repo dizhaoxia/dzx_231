@@ -1,0 +1,62 @@
+.layout {
+  height: 100vh;
+}
+
+.sider {
+  background: #001529;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.logoIcon {
+  font-size: 24px;
+  color: #1890ff;
+}
+
+.logoText {
+  color: white !important;
+  margin: 0 !important;
+  font-size: 18px !important;
+}
+
+.menu {
+  border-right: none;
+  background: transparent;
+  margin-top: 16px;
+}
+
+.header {
+  background: white;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+}
+
+.headerTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.logoutBtn {
+  color: #666;
+}
+
+.logoutBtn:hover {
+  color: #1890ff !important;
+}
+
+.content {
+  background: #f0f2f5;
+  padding: 24px;
+  overflow-y: auto;
+}
