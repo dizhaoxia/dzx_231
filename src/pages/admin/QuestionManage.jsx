@@ -12,14 +12,22 @@ import {
   message,
   Space,
   Tag,
-  Form
+  Form,
+  DatePicker,
+  Badge,
+  Dropdown
 } from 'antd'
 import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   QuestionCircleOutlined,
-  SearchOutlined
+  SearchOutlined,
+  SaveOutlined,
+  FileTextOutlined,
+  ClearOutlined,
+  MoreOutlined,
+  SwapOutlined
 } from '@ant-design/icons'
 import { useCategoryStore } from '../../stores/categoryStore'
 import { useQuestionStore } from '../../stores/questionStore'
@@ -27,6 +35,7 @@ import styles from './QuestionManage.module.css'
 
 const { TextArea } = Input
 const { Option } = Select
+const { RangePicker } = DatePicker
 
 const questionTypeMap = {
   single: { label: '单选题', color: 'blue' },
@@ -34,7 +43,7 @@ const questionTypeMap = {
   judge: { label: '判断题', color: 'orange' }
 }
 
-function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCancel }) {
+function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCancel, onSaveDraft, drafts }) {
   const [form] = Form.useForm()
   const [qType, setQType] = useState('single')
   const [optionList, setOptionList] = useState(['', '', '', ''])
@@ -95,6 +104,22 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
     setAnswerList(vals)
   }
 
+  const getFormData = () => {
+    const values = form.getFieldsValue()
+    const validOptions = qType === 'judge'
+      ? ['正确', '错误']
+      : optionList.filter(o => o && o.trim())
+
+    return {
+      type: qType,
+      question: values.question?.trim() || '',
+      options: validOptions,
+      answer: answerList,
+      explanation: values.explanation?.trim() || '',
+      categoryId: values.categoryId
+    }
+  }
+
   const handleOk = async () => {
     try {
       const values = await form.validateFields()
@@ -124,6 +149,15 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
     } catch (err) {
       console.error('Validation error:', err)
     }
+  }
+
+  const handleDraft = () => {
+    const data = getFormData()
+    if (!data.question) {
+      message.warning('请至少填写题干内容再保存草稿')
+      return
+    }
+    onSaveDraft(data)
   }
 
   const renderOptions = () => {
@@ -197,13 +231,21 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
     <Modal
       title={editingQuestion ? '编辑题目' : '新增题目'}
       open={visible}
-      onOk={handleOk}
       onCancel={onCancel}
-      okText="确定"
-      cancelText="取消"
       width={700}
       destroyOnClose
       maskClosable={false}
+      footer={[
+        <Button key="draft" icon={<SaveOutlined />} onClick={handleDraft}>
+          保存草稿
+        </Button>,
+        <Button key="cancel" onClick={onCancel}>
+          取消
+        </Button>,
+        <Button key="ok" type="primary" onClick={handleOk}>
+          确定
+        </Button>
+      ]}
     >
       <Form form={form} layout="vertical" className={styles.form}>
         <Form.Item
@@ -262,20 +304,45 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
 
 function QuestionManage() {
   const { categories } = useCategoryStore()
-  const { questions, addQuestion, updateQuestion, deleteQuestion } = useQuestionStore()
+  const {
+    questions,
+    drafts,
+    addQuestion,
+    updateQuestion,
+    deleteQuestion,
+    batchDeleteQuestions,
+    batchMoveCategory,
+    searchQuestions,
+    saveDraft,
+    deleteDraft,
+    clearAllDrafts,
+    getDraft
+  } = useQuestionStore()
 
   const [modalVisible, setModalVisible] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState(null)
+  const [selectedRowKeys, setSelectedRowKeys] = useState([])
+  const [searchKeyword, setSearchKeyword] = useState('')
   const [searchCategory, setSearchCategory] = useState(null)
   const [searchType, setSearchType] = useState(null)
+  const [searchDateRange, setSearchDateRange] = useState(null)
+  const [moveModalVisible, setMoveModalVisible] = useState(false)
+  const [moveTargetCategory, setMoveTargetCategory] = useState(null)
+  const [draftModalVisible, setDraftModalVisible] = useState(false)
+  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false)
 
   const filteredQuestions = useMemo(() => {
-    return questions.filter(q => {
-      if (searchCategory && q.categoryId !== searchCategory) return false
-      if (searchType && q.type !== searchType) return false
-      return true
+    if (!searchKeyword && !searchCategory && !searchType && !searchDateRange) {
+      return questions
+    }
+    return searchQuestions({
+      keyword: searchKeyword,
+      type: searchType,
+      categoryId: searchCategory,
+      startTime: searchDateRange?.[0]?.valueOf(),
+      endTime: searchDateRange?.[1]?.valueOf()
     })
-  }, [questions, searchCategory, searchType])
+  }, [questions, searchKeyword, searchCategory, searchType, searchDateRange, searchQuestions])
 
   const handleAdd = () => {
     setEditingQuestion(null)
@@ -302,6 +369,88 @@ function QuestionManage() {
     }
     setModalVisible(false)
   }
+
+  const handleSaveDraft = async (data) => {
+    await saveDraft(data)
+    message.success('草稿已保存')
+  }
+
+  const handleLoadDraft = (draft) => {
+    setEditingQuestion({
+      ...draft,
+      id: null
+    })
+    setDraftModalVisible(false)
+    setModalVisible(true)
+    message.info('已加载草稿内容')
+  }
+
+  const handleDeleteDraft = async (id) => {
+    await deleteDraft(id)
+    message.success('草稿已删除')
+  }
+
+  const handleClearAllDrafts = async () => {
+    Modal.confirm({
+      title: '确认清空',
+      content: '确定要清空所有草稿吗？',
+      okText: '确定',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await clearAllDrafts()
+        message.success('已清空所有草稿')
+      }
+    })
+  }
+
+  const handleBatchDelete = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择要删除的题目')
+      return
+    }
+    Modal.confirm({
+      title: '批量删除',
+      content: `确定要删除选中的 ${selectedRowKeys.length} 道题目吗？`,
+      okText: '确认删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await batchDeleteQuestions(selectedRowKeys)
+        setSelectedRowKeys([])
+        message.success(`已删除 ${selectedRowKeys.length} 道题目`)
+      }
+    })
+  }
+
+  const handleBatchMove = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择要迁移的题目')
+      return
+    }
+    setMoveModalVisible(true)
+  }
+
+  const handleBatchMoveConfirm = async () => {
+    if (!moveTargetCategory) {
+      message.warning('请选择目标分类')
+      return
+    }
+    await batchMoveCategory(selectedRowKeys, moveTargetCategory)
+    setSelectedRowKeys([])
+    setMoveModalVisible(false)
+    setMoveTargetCategory(null)
+    message.success('分类迁移成功')
+  }
+
+  const handleResetSearch = () => {
+    setSearchKeyword('')
+    setSearchCategory(null)
+    setSearchType(null)
+    setSearchDateRange(null)
+  }
+
+  const hasSelected = selectedRowKeys.length > 0
 
   const columns = [
     {
@@ -338,6 +487,24 @@ function QuestionManage() {
       }
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 80,
+      render: (status) => (
+        <Tag color={status === 'disabled' ? 'default' : 'green'}>
+          {status === 'disabled' ? '已禁用' : '正常'}
+        </Tag>
+      )
+    },
+    {
+      title: '录入时间',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      width: 160,
+      render: (time) => time ? new Date(time).toLocaleString('zh-CN') : '-'
+    },
+    {
       title: '操作',
       key: 'action',
       width: 150,
@@ -369,21 +536,40 @@ function QuestionManage() {
           </span>
         }
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            新增题目
-          </Button>
+          <Space>
+            {drafts.length > 0 && (
+              <Badge count={drafts.length} size="small">
+                <Button
+                  icon={<FileTextOutlined />}
+                  onClick={() => setDraftModalVisible(true)}
+                >
+                  草稿箱
+                </Button>
+              </Badge>
+            )}
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+              新增题目
+            </Button>
+          </Space>
         }
         className={styles.card}
       >
         <div className={styles.filterBar}>
-          <Space size="middle">
+          <Space size="middle" wrap>
+            <Input
+              placeholder="搜索题干关键词"
+              style={{ width: 200 }}
+              allowClear
+              value={searchKeyword}
+              onChange={e => setSearchKeyword(e.target.value)}
+              prefix={<SearchOutlined />}
+            />
             <Select
               placeholder="选择分类"
               style={{ width: 160 }}
               allowClear
               value={searchCategory}
               onChange={setSearchCategory}
-              prefix={<SearchOutlined />}
             >
               {categories.map(cat => (
                 <Option key={cat.id} value={cat.id}>{cat.name}</Option>
@@ -400,14 +586,57 @@ function QuestionManage() {
               <Option value="multiple">多选题</Option>
               <Option value="judge">判断题</Option>
             </Select>
+            <RangePicker
+              placeholder={['开始日期', '结束日期']}
+              value={searchDateRange}
+              onChange={setSearchDateRange}
+              style={{ width: 260 }}
+            />
+            <Button icon={<ClearOutlined />} onClick={handleResetSearch}>
+              重置
+            </Button>
             <span className={styles.totalText}>共 {filteredQuestions.length} 道题目</span>
           </Space>
         </div>
+
+        {hasSelected && (
+          <div className={styles.batchBar}>
+            <Space>
+              <span>已选择 {selectedRowKeys.length} 项</span>
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={handleBatchDelete}
+                size="small"
+              >
+                批量删除
+              </Button>
+              <Button
+                icon={<SwapOutlined />}
+                onClick={handleBatchMove}
+                size="small"
+              >
+                批量迁移分类
+              </Button>
+              <Button
+                type="link"
+                onClick={() => setSelectedRowKeys([])}
+                size="small"
+              >
+                取消选择
+              </Button>
+            </Space>
+          </div>
+        )}
 
         <Table
           columns={columns}
           dataSource={filteredQuestions}
           rowKey="id"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: setSelectedRowKeys
+          }}
           pagination={{
             pageSize: 10,
             showSizeChanger: true,
@@ -423,7 +652,96 @@ function QuestionManage() {
         categories={categories}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
+        onSaveDraft={handleSaveDraft}
+        drafts={drafts}
       />
+
+      <Modal
+        title="批量迁移分类"
+        open={moveModalVisible}
+        onOk={handleBatchMoveConfirm}
+        onCancel={() => { setMoveModalVisible(false); setMoveTargetCategory(null) }}
+        okText="确认迁移"
+        cancelText="取消"
+      >
+        <div style={{ padding: '16px 0' }}>
+          <p>将选中的 {selectedRowKeys.length} 道题目迁移到：</p>
+          <Select
+            placeholder="请选择目标分类"
+            style={{ width: '100%' }}
+            value={moveTargetCategory}
+            onChange={setMoveTargetCategory}
+          >
+            {categories.map(cat => (
+              <Option key={cat.id} value={cat.id}>{cat.name}</Option>
+            ))}
+          </Select>
+        </div>
+      </Modal>
+
+      <Modal
+        title={
+          <span>
+            <FileTextOutlined style={{ marginRight: 8 }} />
+            草稿箱
+            <Tag color="blue" style={{ marginLeft: 8 }}>{drafts.length}</Tag>
+          </span>
+        }
+        open={draftModalVisible}
+        onCancel={() => setDraftModalVisible(false)}
+        footer={
+          drafts.length > 0 ? [
+            <Button key="clear" danger icon={<DeleteOutlined />} onClick={handleClearAllDrafts}>
+              清空草稿
+            </Button>,
+            <Button key="close" onClick={() => setDraftModalVisible(false)}>
+              关闭
+            </Button>
+          ] : [
+            <Button key="close" onClick={() => setDraftModalVisible(false)}>
+              关闭
+            </Button>
+          ]
+        }
+        width={600}
+      >
+        {drafts.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
+            暂无草稿
+          </div>
+        ) : (
+          <div className={styles.draftList}>
+            {drafts.map((draft) => (
+              <div key={draft.id} className={styles.draftItem}>
+                <div className={styles.draftContent}>
+                  <div className={styles.draftQuestion}>
+                    <Tag color={questionTypeMap[draft.type]?.color}>
+                      {questionTypeMap[draft.type]?.label}
+                    </Tag>
+                    <span>{draft.question || '未填写题干'}</span>
+                  </div>
+                  <div className={styles.draftTime}>
+                    {new Date(draft.updatedAt || draft.createdAt).toLocaleString('zh-CN')}
+                  </div>
+                </div>
+                <Space>
+                  <Button type="link" size="small" onClick={() => handleLoadDraft(draft)}>
+                    加载
+                  </Button>
+                  <Popconfirm
+                    title="确定删除此草稿？"
+                    onConfirm={() => handleDeleteDraft(draft.id)}
+                    okText="确定"
+                    cancelText="取消"
+                  >
+                    <Button type="link" danger size="small">删除</Button>
+                  </Popconfirm>
+                </Space>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

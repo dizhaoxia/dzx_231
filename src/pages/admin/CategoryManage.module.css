@@ -25,3 +25,12 @@
 .form {
   margin-top: 20px;
 }
+
+.disabledRow {
+  opacity: 0.5;
+  background: #fafafa;
+}
+
+.secondaryText {
+  color: #999;
+}

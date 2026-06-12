@@ -8,23 +8,59 @@ export const useExamStore = create((set, get) => ({
 
   init: async () => {
     const examRecords = await storage.get('examRecords', [])
-    set({ examRecords, isLoading: false })
+    const cachedExam = await storage.get('currentExamCache', null)
+    set({
+      examRecords,
+      currentExam: cachedExam,
+      isLoading: false
+    })
   },
 
   startExam: (questions, duration) => {
     const answers = {}
+    const marked = {}
     questions.forEach(q => {
       answers[q.id] = []
+      marked[q.id] = false
     })
     const exam = {
       id: generateId(),
       questionIds: questions.map(q => q.id),
       answers,
+      marked,
       startTime: Date.now(),
       duration: duration * 60 * 1000,
       endTime: null,
-      submitted: false
+      submitted: false,
+      halfTimeAlerted: false,
+      fiveMinAlerted: false
     }
+    storage.set('currentExamCache', exam)
+    set({ currentExam: exam })
+    return exam
+  },
+
+  startWrongExam: (questions, duration) => {
+    const answers = {}
+    const marked = {}
+    questions.forEach(q => {
+      answers[q.id] = []
+      marked[q.id] = false
+    })
+    const exam = {
+      id: generateId(),
+      questionIds: questions.map(q => q.id),
+      answers,
+      marked,
+      startTime: Date.now(),
+      duration: duration * 60 * 1000,
+      endTime: null,
+      submitted: false,
+      isWrongExam: true,
+      halfTimeAlerted: false,
+      fiveMinAlerted: false
+    }
+    storage.set('currentExamCache', exam)
     set({ currentExam: exam })
     return exam
   },
@@ -39,7 +75,58 @@ export const useExamStore = create((set, get) => ({
         [questionId]: answer
       }
     }
+    storage.set('currentExamCache', newExam)
     set({ currentExam: newExam })
+  },
+
+  toggleMark: (questionId) => {
+    const { currentExam } = get()
+    if (!currentExam) return
+    const newExam = {
+      ...currentExam,
+      marked: {
+        ...currentExam.marked,
+        [questionId]: !currentExam.marked[questionId]
+      }
+    }
+    storage.set('currentExamCache', newExam)
+    set({ currentExam: newExam })
+  },
+
+  setHalfTimeAlerted: () => {
+    const { currentExam } = get()
+    if (!currentExam) return
+    const newExam = { ...currentExam, halfTimeAlerted: true }
+    storage.set('currentExamCache', newExam)
+    set({ currentExam: newExam })
+  },
+
+  setFiveMinAlerted: () => {
+    const { currentExam } = get()
+    if (!currentExam) return
+    const newExam = { ...currentExam, fiveMinAlerted: true }
+    storage.set('currentExamCache', newExam)
+    set({ currentExam: newExam })
+  },
+
+  saveAnswerCache: () => {
+    const { currentExam } = get()
+    if (!currentExam) return
+    storage.set('currentExamCache', currentExam)
+  },
+
+  hasCachedExam: async () => {
+    const cached = await storage.get('currentExamCache', null)
+    return cached && !cached.submitted
+  },
+
+  recoverCachedExam: async () => {
+    const cached = await storage.get('currentExamCache', null)
+    if (cached && !cached.submitted) {
+      set({ currentExam: cached })
+      return cached
+    }
+    return null
   },
 
   submitExam: async (questions) => {
@@ -70,11 +157,13 @@ export const useExamStore = create((set, get) => ({
 
     const newRecords = [record, ...examRecords]
     await storage.set('examRecords', newRecords)
+    await storage.set('currentExamCache', null)
     set({ currentExam: record, examRecords: newRecords })
     return record
   },
 
-  clearCurrentExam: () => {
+  clearCurrentExam: async () => {
+    await storage.set('currentExamCache', null)
     set({ currentExam: null })
   },
 

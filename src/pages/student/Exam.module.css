@@ -4,7 +4,7 @@
 }
 
 .startCard {
-  max-width: 500px;
+  max-width: 560px;
   margin: 0 auto;
   border-radius: 8px;
 }
@@ -75,6 +75,12 @@
 
 .timerWarning {
   color: #ff4d4f !important;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .questionTitle {
@@ -198,6 +204,7 @@
   transition: all 0.2s;
   background: white;
   color: #666;
+  position: relative;
 }
 
 .answerDot:hover {
@@ -225,6 +232,20 @@
 
 .currentDot {
   box-shadow: 0 0 0 2px #1890ff;
+}
+
+.markedDot {
+  border-color: #faad14 !important;
+  background: #fffbe6 !important;
+}
+
+.markBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 10px;
+  color: #faad14;
+  line-height: 1;
 }
 
 .answerLegend {
@@ -264,8 +285,14 @@
   margin: 8px 0 !important;
 }
 
+.progressDetail {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
 .resultCard {
-  max-width: 700px;
+  max-width: 800px;
   margin: 0 auto;
   border-radius: 8px;
 }
@@ -277,8 +304,7 @@
 }
 
 .resultQuestions {
-  max-height: 400px;
-  overflow-y: auto;
+  max-height: none;
   margin-bottom: 24px;
 }
 
@@ -287,31 +313,64 @@
   background: #fafafa;
   border-radius: 6px;
   margin-bottom: 12px;
+  border-left: 4px solid #52c41a;
+}
+
+.resultWrongItem {
+  border-left-color: #ff4d4f;
+  background: #fffbfb;
 }
 
 .resultQuestionHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .resultQuestionText {
-  margin-bottom: 8px;
-  line-height: 1.5;
+  margin-bottom: 12px;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.resultOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.resultOptionItem {
+  padding: 8px 12px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e8e8e8;
+}
+
+.resultCorrectOption {
+  border-color: #52c41a;
+  background: #f6ffed;
+}
+
+.resultWrongOption {
+  border-color: #ff4d4f;
+  background: #fff2f0;
 }
 
 .resultAnswer {
   display: flex;
-  gap: 20px;
-  margin-bottom: 8px;
+  gap: 24px;
+  margin-bottom: 12px;
+  padding: 8px 0;
 }
 
 .resultExplanation {
-  padding: 8px 12px;
+  padding: 12px 16px;
   background: #fffbe6;
-  border-radius: 4px;
-  margin-top: 8px;
+  border-radius: 6px;
+  border-left: 3px solid #faad14;
+  line-height: 1.7;
 }
 
 .backBtn {

@@ -12,7 +12,15 @@ import {
   Select,
   Popconfirm,
   Modal,
-  Result
+  Result,
+  InputNumber,
+  Form,
+  Row,
+  Col,
+  Statistic,
+  Progress,
+  Tooltip,
+  Divider
 } from 'antd'
 import {
   FormOutlined,
@@ -21,11 +29,18 @@ import {
   RightOutlined,
   CheckOutlined,
   RedoOutlined,
-  ExclamationCircleOutlined
+  ExclamationCircleOutlined,
+  FilterOutlined,
+  PlayCircleOutlined,
+  ClockCircleOutlined,
+  CloseOutlined,
+  UnorderedListOutlined,
+  FileTextOutlined
 } from '@ant-design/icons'
 import { useCategoryStore } from '../../stores/categoryStore'
 import { useQuestionStore } from '../../stores/questionStore'
 import { useWrongQuestionStore } from '../../stores/wrongQuestionStore'
+import { useExamStore } from '../../stores/examStore'
 import styles from './WrongBook.module.css'
 
 const { Title, Text } = Typography
@@ -39,26 +54,79 @@ const questionTypeMap = {
 
 function WrongBook() {
   const { categories } = useCategoryStore()
-  const { getQuestionById } = useQuestionStore()
-  const { wrongQuestions, removeWrongQuestion, clearAllWrong } = useWrongQuestionStore()
+  const { getQuestionById, getRandomQuestions } = useQuestionStore()
+  const {
+    wrongQuestions,
+    removeWrongQuestion,
+    clearAllWrong,
+    batchRemoveWrongQuestions,
+    getWrongCount
+  } = useWrongQuestionStore()
+  const { startWrongExam, currentExam, submitExam, clearCurrentExam, setAnswer, toggleMark } = useExamStore()
 
+  const [viewMode, setViewMode] = useState('list')
   const [currentIndex, setCurrentIndex] = useState(0)
   const [userAnswer, setUserAnswer] = useState([])
   const [submitted, setSubmitted] = useState(false)
   const [isCorrect, setIsCorrect] = useState(false)
   const [filterCategory, setFilterCategory] = useState(null)
-  const [viewMode, setViewMode] = useState('list')
+  const [filterType, setFilterType] = useState(null)
+  const [filterMinCount, setFilterMinCount] = useState(null)
+  const [selectedIds, setSelectedIds] = useState([])
+  const [showExamSetup, setShowExamSetup] = useState(false)
+  const [examForm] = Form.useForm()
+  const [examStarted, setExamStarted] = useState(false)
+  const [examFinished, setExamFinished] = useState(false)
+  const [examCurrentIndex, setExamCurrentIndex] = useState(0)
 
   const filteredWrongQuestions = useMemo(() => {
-    if (!filterCategory) return wrongQuestions
-    return wrongQuestions.filter(w => {
-      const q = getQuestionById(w.questionId)
-      return q && q.categoryId === filterCategory
-    })
-  }, [wrongQuestions, filterCategory, getQuestionById])
+    let result = [...wrongQuestions]
+
+    if (filterCategory) {
+      result = result.filter(w => {
+        const q = getQuestionById(w.questionId)
+        return q && q.categoryId === filterCategory
+      })
+    }
+
+    if (filterType) {
+      result = result.filter(w => {
+        const q = getQuestionById(w.questionId)
+        return q && q.type === filterType
+      })
+    }
+
+    if (filterMinCount !== null && filterMinCount !== undefined) {
+      result = result.filter(w => (w.wrongCount || 1) >= filterMinCount)
+    }
+
+    return result.sort((a, b) => (b.wrongCount || 1) - (a.wrongCount || 1))
+  }, [wrongQuestions, filterCategory, filterType, filterMinCount, getQuestionById])
+
+  const examQuestions = useMemo(() => {
+    if (!currentExam || !currentExam.isWrongExam) return []
+    return currentExam.questionIds.map(id => getQuestionById(id)).filter(Boolean)
+  }, [currentExam, getQuestionById])
 
   const currentWrong = filteredWrongQuestions[currentIndex]
   const currentQuestion = currentWrong ? getQuestionById(currentWrong.questionId) : null
+  const currentExamQuestion = examQuestions[examCurrentIndex]
+  const currentExamAnswer = currentExam?.answers?.[currentExamQuestion?.id] || []
+
+  const stats = useMemo(() => {
+    const typeCount = { single: 0, multiple: 0, judge: 0 }
+    const categoryCount = {}
+    let totalWrongTimes = 0
+    wrongQuestions.forEach(w => {
+      const q = getQuestionById(w.questionId)
+      if (q) {
+        typeCount[q.type] = (typeCount[q.type] || 0) + 1
+        categoryCount[q.categoryId] = (categoryCount[q.categoryId] || 0) + 1
+      }
+      totalWrongTimes += w.wrongCount || 1
+    })
+    return { typeCount, categoryCount, totalWrongTimes }
+  }, [wrongQuestions, getQuestionById])
 
   const handleRedo = () => {
     setUserAnswer([])
@@ -74,6 +142,16 @@ function WrongBook() {
   const handleMultipleChange = (checkedValues) => {
     if (submitted) return
     setUserAnswer(checkedValues)
+  }
+
+  const handleExamSingleSelect = (e) => {
+    if (examFinished) return
+    setAnswer(currentExamQuestion.id, [e.target.value])
+  }
+
+  const handleExamMultipleChange = (checkedValues) => {
+    if (examFinished) return
+    setAnswer(currentExamQuestion.id, checkedValues)
   }
 
   const handleSubmit = () => {
@@ -101,6 +179,8 @@ function WrongBook() {
           message.success('已从错题本移除')
           if (currentIndex >= filteredWrongQuestions.length - 1 && currentIndex > 0) {
             setCurrentIndex(currentIndex - 1)
+          } else if (filteredWrongQuestions.length === 1) {
+            setCurrentIndex(0)
           }
           handleRedo()
         }
@@ -110,10 +190,30 @@ function WrongBook() {
 
   const handleRemove = (questionId) => {
     removeWrongQuestion(questionId)
+    setSelectedIds(prev => prev.filter(id => id !== questionId))
     message.success('已移除')
     if (currentIndex >= filteredWrongQuestions.length - 1 && currentIndex > 0) {
       setCurrentIndex(currentIndex - 1)
     }
+  }
+
+  const handleBatchRemove = () => {
+    if (selectedIds.length === 0) {
+      message.warning('请先选择要移除的错题')
+      return
+    }
+    Modal.confirm({
+      title: '批量移除',
+      content: `确定要移除选中的 ${selectedIds.length} 道错题吗？`,
+      okText: '确认移除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await batchRemoveWrongQuestions(selectedIds)
+        setSelectedIds([])
+        message.success('已批量移除')
+      }
+    })
   }
 
   const handleClearAll = () => {
@@ -125,8 +225,9 @@ function WrongBook() {
       okButtonProps: { danger: true },
       onOk: () => {
         clearAllWrong()
-        message.success('已清空错题本')
+        setSelectedIds([])
         setCurrentIndex(0)
+        message.success('已清空错题本')
       }
     })
   }
@@ -149,31 +250,98 @@ function WrongBook() {
     }
   }
 
-  const renderOptions = () => {
-    if (!currentQuestion) return null
+  const handleStartWrongExam = async () => {
+    try {
+      const values = await examForm.validateFields()
+      const { questionCount, duration } = values
 
-    const { type, options } = currentQuestion
+      if (filteredWrongQuestions.length === 0) {
+        message.warning('当前筛选条件下没有错题')
+        return
+      }
+
+      const availableIds = filteredWrongQuestions.map(w => w.questionId)
+      const effectiveCount = Math.min(questionCount, availableIds.length)
+
+      const questionPool = availableIds
+        .sort(() => Math.random() - 0.5)
+        .slice(0, effectiveCount)
+        .map(id => getQuestionById(id))
+        .filter(Boolean)
+
+      if (questionPool.length === 0) {
+        message.warning('没有可用的错题')
+        return
+      }
+
+      startWrongExam(questionPool, duration)
+      setExamStarted(true)
+      setExamFinished(false)
+      setExamCurrentIndex(0)
+      setShowExamSetup(false)
+      message.success(`开始错题专项考试，共 ${questionPool.length} 道题`)
+    } catch (error) {
+      console.error('Validation failed:', error)
+    }
+  }
+
+  const handleSubmitExam = () => {
+    Modal.confirm({
+      title: '确认交卷',
+      content: '确定要提交试卷吗？提交后无法修改答案。',
+      okText: '确认交卷',
+      cancelText: '继续答题',
+      onOk: async () => {
+        await submitExam(examQuestions)
+        setExamFinished(true)
+      }
+    })
+  }
+
+  const handleExitExam = () => {
+    Modal.confirm({
+      title: '退出考试',
+      content: '确定要退出本次错题专项考试吗？',
+      okText: '确定退出',
+      cancelText: '继续答题',
+      onOk: () => {
+        clearCurrentExam()
+        setExamStarted(false)
+        setExamFinished(false)
+        setExamCurrentIndex(0)
+        setViewMode('list')
+      }
+    })
+  }
+
+  const formatDate = (timestamp) => {
+    if (!timestamp) return '-'
+    return new Date(timestamp).toLocaleString('zh-CN')
+  }
+
+  const renderOptions = (question, answer, disabled, onChangeSingle, onChangeMultiple) => {
+    if (!question) return null
+
+    const { type, options } = question
 
     if (type === 'single' || type === 'judge') {
       return (
         <Radio.Group
-          value={userAnswer[0]}
-          onChange={handleSingleSelect}
+          value={answer[0]}
+          onChange={onChangeSingle}
           className={styles.optionsGroup}
-          disabled={submitted}
+          disabled={disabled}
         >
           {options.map((opt, idx) => {
             const optionLabel = String.fromCharCode(65 + idx)
-            const isCorrectOption = currentQuestion.answer.includes(optionLabel)
-            const isUserOption = userAnswer.includes(optionLabel)
+            const isCorrectOption = question.answer.includes(optionLabel)
+            const isUserOption = answer.includes(optionLabel)
 
             let optionClass = styles.optionItem
-            if (submitted) {
-              if (isCorrectOption) {
-                optionClass += ' ' + styles.correctOption
-              } else if (isUserOption && !isCorrectOption) {
-                optionClass += ' ' + styles.wrongOption
-              }
+            if (disabled && isCorrectOption) {
+              optionClass += ' ' + styles.correctOption
+            } else if (disabled && isUserOption && !isCorrectOption) {
+              optionClass += ' ' + styles.wrongOption
             }
 
             return (
@@ -189,23 +357,21 @@ function WrongBook() {
 
     return (
       <Checkbox.Group
-        value={userAnswer}
-        onChange={handleMultipleChange}
+        value={answer}
+        onChange={onChangeMultiple}
         className={styles.optionsGroup}
-        disabled={submitted}
+        disabled={disabled}
       >
         {options.map((opt, idx) => {
           const optionLabel = String.fromCharCode(65 + idx)
-          const isCorrectOption = currentQuestion.answer.includes(optionLabel)
-          const isUserOption = userAnswer.includes(optionLabel)
+          const isCorrectOption = question.answer.includes(optionLabel)
+          const isUserOption = answer.includes(optionLabel)
 
           let optionClass = styles.optionItem
-          if (submitted) {
-            if (isCorrectOption) {
-              optionClass += ' ' + styles.correctOption
-            } else if (isUserOption && !isCorrectOption) {
-              optionClass += ' ' + styles.wrongOption
-            }
+          if (disabled && isCorrectOption) {
+            optionClass += ' ' + styles.correctOption
+          } else if (disabled && isUserOption && !isCorrectOption) {
+            optionClass += ' ' + styles.wrongOption
           }
 
           return (
@@ -216,6 +382,203 @@ function WrongBook() {
           )
         })}
       </Checkbox.Group>
+    )
+  }
+
+  if (examStarted) {
+    if (examFinished && currentExam) {
+      const accuracy = currentExam.accuracy || 0
+      const correctCount = currentExam.correctCount || 0
+      const wrongCount = currentExam.wrongCount || 0
+      const totalCount = currentExam.totalCount || 0
+
+      return (
+        <div className={styles.container}>
+          <Card className={styles.examResultCard}>
+            <Result
+              status={accuracy >= 60 ? 'success' : 'warning'}
+              title={`错题专项考试结束，得分 ${accuracy} 分`}
+              subTitle={`共 ${totalCount} 道题，正确 ${correctCount} 道，错误 ${wrongCount} 道`}
+            />
+            <Row gutter={16} className={styles.statsRow}>
+              <Col span={8}>
+                <Statistic
+                  title="正确率"
+                  value={accuracy}
+                  suffix="%"
+                  valueStyle={{ color: accuracy >= 60 ? '#3f8600' : '#cf1322' }}
+                />
+              </Col>
+              <Col span={8}>
+                <Statistic
+                  title="正确题数"
+                  value={correctCount}
+                  prefix={<CheckOutlined />}
+                  valueStyle={{ color: '#3f8600' }}
+                />
+              </Col>
+              <Col span={8}>
+                <Statistic
+                  title="错误题数"
+                  value={wrongCount}
+                  prefix={<CloseOutlined />}
+                  valueStyle={{ color: '#cf1322' }}
+                />
+              </Col>
+            </Row>
+            <div className={styles.resultQuestions}>
+              <Title level={5}>答题详情</Title>
+              {examQuestions.map((q, idx) => {
+                const userAnswer = currentExam.answers[q.id] || []
+                const correctAnswer = q.answer || []
+                const isCorrect = userAnswer.length === correctAnswer.length &&
+                  userAnswer.every(a => correctAnswer.includes(a))
+                return (
+                  <div
+                    key={q.id}
+                    className={`${styles.resultQuestionItem} ${!isCorrect ? styles.resultWrongItem : ''}`}
+                  >
+                    <div className={styles.resultQuestionHeader}>
+                      <Space>
+                        <Tag color={isCorrect ? 'green' : 'red'}>
+                          {isCorrect ? '✓ 正确' : '✗ 错误'}
+                        </Tag>
+                        <Tag color={questionTypeMap[q.type]?.color}>
+                          {questionTypeMap[q.type]?.label}
+                        </Tag>
+                        <Text type="secondary">第 {idx + 1} 题</Text>
+                      </Space>
+                    </div>
+                    <div className={styles.resultQuestionText}>
+                      <Text strong>{q.question}</Text>
+                    </div>
+                    <div className={styles.resultAnswer}>
+                      <div>
+                        <Text type="secondary">你的答案：</Text>
+                        <Text strong style={{ color: isCorrect ? '#3f8600' : '#cf1322' }}>
+                          {userAnswer.length > 0 ? userAnswer.join('、') : '未作答'}
+                        </Text>
+                      </div>
+                      <div>
+                        <Text type="secondary">正确答案：</Text>
+                        <Text strong style={{ color: '#3f8600' }}>
+                          {correctAnswer.join('、')}
+                        </Text>
+                      </div>
+                    </div>
+                    <div className={styles.resultExplanation}>
+                      <Text strong>💡 答案解析：</Text>
+                      <Text style={{ marginLeft: 4 }}>{q.explanation}</Text>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <Button
+              type="primary"
+              block
+              size="large"
+              onClick={() => {
+                clearCurrentExam()
+                setExamStarted(false)
+                setExamFinished(false)
+                setExamCurrentIndex(0)
+                setViewMode('list')
+              }}
+              style={{ marginTop: 16 }}
+            >
+              返回错题本
+            </Button>
+          </Card>
+        </div>
+      )
+    }
+
+    return (
+      <div className={styles.container}>
+        <div className={styles.examLayout}>
+          <div className={styles.questionArea}>
+            <Card className={styles.questionCard}>
+              <div className={styles.questionHeader}>
+                <Space>
+                  <Tag color="red">错题专项考试</Tag>
+                  <Tag color={questionTypeMap[currentExamQuestion?.type]?.color}>
+                    {questionTypeMap[currentExamQuestion?.type]?.label}
+                  </Tag>
+                  <Text type="secondary">
+                    第 {examCurrentIndex + 1} / {examQuestions.length} 题
+                  </Text>
+                </Space>
+              </div>
+              <Title level={4} className={styles.questionTitle}>
+                {currentExamQuestion?.question}
+              </Title>
+              <div className={styles.optionsContainer}>
+                {renderOptions(
+                  currentExamQuestion,
+                  currentExamAnswer,
+                  examFinished,
+                  handleExamSingleSelect,
+                  handleExamMultipleChange
+                )}
+              </div>
+            </Card>
+            <div className={styles.actionBar}>
+              <Button
+                onClick={() => setExamCurrentIndex(Math.max(0, examCurrentIndex - 1))}
+                disabled={examCurrentIndex === 0}
+                icon={<LeftOutlined />}
+              >
+                上一题
+              </Button>
+              <Button
+                type="primary"
+                onClick={handleSubmitExam}
+                size="large"
+                icon={<FileTextOutlined />}
+              >
+                交卷
+              </Button>
+              <Button
+                onClick={() => setExamCurrentIndex(Math.min(examQuestions.length - 1, examCurrentIndex + 1))}
+                disabled={examCurrentIndex === examQuestions.length - 1}
+                icon={<RightOutlined />}
+              >
+                下一题
+              </Button>
+            </div>
+          </div>
+          <div className={styles.sidebar}>
+            <div className={styles.answerCard}>
+              <div className={styles.answerCardTitle}>答题卡</div>
+              <div className={styles.answerGrid}>
+                {examQuestions.map((q, idx) => {
+                  const answered = currentExam?.answers[q.id]?.length > 0
+                  let dotClass = styles.answerDot
+                  if (answered) dotClass += ' ' + styles.answeredDot
+                  if (idx === examCurrentIndex) dotClass += ' ' + styles.currentDot
+                  return (
+                    <div
+                      key={q.id}
+                      className={dotClass}
+                      onClick={() => setExamCurrentIndex(idx)}
+                    >
+                      {idx + 1}
+                    </div>
+                  )
+                })}
+              </div>
+              <div className={styles.answerLegend}>
+                <span><i className={styles.legendDot + ' ' + styles.answeredDot}></i>已答</span>
+                <span><i className={styles.legendDot}></i>未答</span>
+              </div>
+            </div>
+            <Button danger block onClick={handleExitExam}>
+              退出考试
+            </Button>
+          </div>
+        </div>
+      </div>
     )
   }
 
@@ -242,12 +605,23 @@ function WrongBook() {
                   <Option key={cat.id} value={cat.id}>{cat.name}</Option>
                 ))}
               </Select>
+              <Select
+                placeholder="筛选题型"
+                style={{ width: 140 }}
+                allowClear
+                value={filterType}
+                onChange={setFilterType}
+              >
+                <Option value="single">单选题</Option>
+                <Option value="multiple">多选题</Option>
+                <Option value="judge">判断题</Option>
+              </Select>
             </Space>
           }
           className={styles.card}
         >
           <Empty
-            description="暂无错题"
+            description={wrongQuestions.length === 0 ? "暂无错题，继续保持！" : "当前筛选条件下没有错题"}
             className={styles.empty}
           />
         </Card>
@@ -256,6 +630,8 @@ function WrongBook() {
   }
 
   if (viewMode === 'list') {
+    const hasSelected = selectedIds.length > 0
+
     return (
       <div className={styles.container}>
         <Card
@@ -269,7 +645,7 @@ function WrongBook() {
             </span>
           }
           extra={
-            <Space>
+            <Space wrap>
               <Select
                 placeholder="筛选分类"
                 style={{ width: 140 }}
@@ -281,16 +657,64 @@ function WrongBook() {
                   <Option key={cat.id} value={cat.id}>{cat.name}</Option>
                 ))}
               </Select>
+              <Select
+                placeholder="筛选题型"
+                style={{ width: 140 }}
+                allowClear
+                value={filterType}
+                onChange={setFilterType}
+              >
+                <Option value="single">单选题</Option>
+                <Option value="multiple">多选题</Option>
+                <Option value="judge">判断题</Option>
+              </Select>
+              <Select
+                placeholder="最少做错次数"
+                style={{ width: 140 }}
+                allowClear
+                value={filterMinCount}
+                onChange={setFilterMinCount}
+                suffixIcon={<FilterOutlined />}
+              >
+                <Option value={1}>≥ 1 次</Option>
+                <Option value={2}>≥ 2 次</Option>
+                <Option value={3}>≥ 3 次</Option>
+                <Option value={5}>≥ 5 次</Option>
+              </Select>
               <Button
                 icon={<RedoOutlined />}
                 onClick={() => {
                   setCurrentIndex(0)
+                  setUserAnswer([])
+                  setSubmitted(false)
+                  setIsCorrect(false)
                   setViewMode('practice')
                 }}
-                type="primary"
               >
-                错题重做
+                逐题重做
               </Button>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={() => setShowExamSetup(true)}
+                disabled={filteredWrongQuestions.length === 0}
+              >
+                专项考试
+              </Button>
+              <Popconfirm
+                title={`确定移除选中的 ${selectedIds.length} 道错题？`}
+                onConfirm={handleBatchRemove}
+                okText="确定"
+                cancelText="取消"
+                disabled={selectedIds.length === 0}
+              >
+                <Button
+                  icon={<DeleteOutlined />}
+                  disabled={selectedIds.length === 0}
+                >
+                  批量移除
+                </Button>
+              </Popconfirm>
               <Button
                 danger
                 icon={<DeleteOutlined />}
@@ -302,23 +726,116 @@ function WrongBook() {
           }
           className={styles.card}
         >
+          {wrongQuestions.length > 0 && (
+            <Row gutter={16} className={styles.statsOverview}>
+              <Col xs={12} sm={6}>
+                <Card size="small" className={styles.statCard}>
+                  <Statistic
+                    title="错题总数"
+                    value={getWrongCount()}
+                    suffix="道"
+                    valueStyle={{ color: '#ff4d4f' }}
+                  />
+                </Card>
+              </Col>
+              <Col xs={12} sm={6}>
+                <Card size="small" className={styles.statCard}>
+                  <Statistic
+                    title="累计做错"
+                    value={stats.totalWrongTimes}
+                    suffix="次"
+                    valueStyle={{ color: '#faad14' }}
+                  />
+                </Card>
+              </Col>
+              <Col xs={12} sm={6}>
+                <Card size="small" className={styles.statCard}>
+                  <Statistic
+                    title="单选题"
+                    value={stats.typeCount.single || 0}
+                    suffix="道"
+                    valueStyle={{ color: '#1890ff' }}
+                  />
+                </Card>
+              </Col>
+              <Col xs={12} sm={6}>
+                <Card size="small" className={styles.statCard}>
+                  <Statistic
+                    title="多选题"
+                    value={stats.typeCount.multiple || 0}
+                    suffix="道"
+                    valueStyle={{ color: '#52c41a' }}
+                  />
+                </Card>
+              </Col>
+            </Row>
+          )}
+
+          {hasSelected && (
+            <div className={styles.batchBar}>
+              <Space>
+                <span>已选择 {selectedIds.length} 道错题</span>
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => setSelectedIds([])}
+                >
+                  取消选择
+                </Button>
+                <Button
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={handleBatchRemove}
+                >
+                  批量移除
+                </Button>
+              </Space>
+            </div>
+          )}
+
           <div className={styles.wrongList}>
             {filteredWrongQuestions.map((w, idx) => {
               const q = getQuestionById(w.questionId)
               if (!q) return null
               const category = categories.find(c => c.id === q.categoryId)
+              const isSelected = selectedIds.includes(w.questionId)
 
               return (
-                <div key={w.questionId} className={styles.wrongItem}>
+                <div key={w.questionId} className={`${styles.wrongItem} ${isSelected ? styles.selectedItem : ''}`}>
                   <div className={styles.wrongItemHeader}>
-                    <Space>
+                    <Space wrap>
+                      <Checkbox
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds([...selectedIds, w.questionId])
+                          } else {
+                            setSelectedIds(selectedIds.filter(id => id !== w.questionId))
+                          }
+                        }}
+                      />
                       <Tag color={questionTypeMap[q.type]?.color}>
                         {questionTypeMap[q.type]?.label}
                       </Tag>
                       <Tag color="blue">{category?.name || '未分类'}</Tag>
-                      <Text type="secondary">
-                        错误 {w.wrongCount} 次
-                      </Text>
+                      <Tooltip title="做错次数">
+                        <Tag color="red">
+                          <ExclamationCircleOutlined /> 做错 {w.wrongCount || 1} 次
+                        </Tag>
+                      </Tooltip>
+                      <Tooltip title="首次出错时间">
+                        <Text type="secondary" className={styles.wrongTime}>
+                          <ClockCircleOutlined /> 首次：{formatDate(w.firstWrongTime || w.addTime)}
+                        </Text>
+                      </Tooltip>
+                      {w.lastWrongTime && (
+                        <Tooltip title="最近做错时间">
+                          <Text type="secondary" className={styles.wrongTime}>
+                            最近：{formatDate(w.lastWrongTime)}
+                          </Text>
+                        </Tooltip>
+                      )}
                     </Space>
                     <Space>
                       <Button
@@ -358,14 +875,74 @@ function WrongBook() {
                   </div>
                   <div className={styles.wrongItemAnswer}>
                     <Text type="secondary">
-                      正确答案：{q.answer.join('、')}
+                      正确答案：<Text strong>{q.answer.join('、')}</Text>
                     </Text>
+                    {w.lastWrongAnswer && w.lastWrongAnswer.length > 0 && (
+                      <Text type="secondary" style={{ marginLeft: 16 }}>
+                        最近错误答案：<Text strong style={{ color: '#ff4d4f' }}>{w.lastWrongAnswer.join('、')}</Text>
+                      </Text>
+                    )}
                   </div>
                 </div>
               )
             })}
           </div>
         </Card>
+
+        <Modal
+          title={
+            <span>
+              <PlayCircleOutlined style={{ color: '#1890ff', marginRight: 8 }} />
+              错题专项考试设置
+            </span>
+          }
+          open={showExamSetup}
+          onCancel={() => setShowExamSetup(false)}
+          footer={null}
+          destroyOnClose
+        >
+          <Form form={examForm} layout="vertical">
+            <div className={styles.examSetupTip}>
+              当前筛选条件下共有 <strong>{filteredWrongQuestions.length}</strong> 道错题可用
+            </div>
+            <Form.Item
+              name="questionCount"
+              label="题目数量"
+              rules={[{ required: true, message: '请输入题目数量' }]}
+              initialValue={Math.min(10, filteredWrongQuestions.length)}
+            >
+              <InputNumber
+                min={1}
+                max={filteredWrongQuestions.length}
+                style={{ width: '100%' }}
+                placeholder={`请输入题目数量（最多 ${filteredWrongQuestions.length} 道）`}
+              />
+            </Form.Item>
+            <Form.Item
+              name="duration"
+              label="考试时长（分钟）"
+              rules={[{ required: true, message: '请输入考试时长' }]}
+              initialValue={Math.max(10, Math.min(30, filteredWrongQuestions.length * 2))}
+            >
+              <InputNumber
+                min={5}
+                max={180}
+                style={{ width: '100%' }}
+                placeholder="请输入考试时长"
+              />
+            </Form.Item>
+            <Form.Item style={{ marginBottom: 0 }}>
+              <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+                <Button onClick={() => setShowExamSetup(false)}>
+                  取消
+                </Button>
+                <Button type="primary" onClick={handleStartWrongExam}>
+                  开始考试
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Modal>
       </div>
     )
   }
@@ -377,25 +954,42 @@ function WrongBook() {
           <span className={styles.cardTitle}>
             <FormOutlined className={styles.titleIcon} />
             错题重做
+            <Tag color="red" style={{ marginLeft: 8 }}>
+              剩余 {filteredWrongQuestions.length} 道
+            </Tag>
           </span>
         }
         extra={
-          <Button onClick={() => setViewMode('list')}>
-            返回列表
-          </Button>
+          <Space>
+            <Button icon={<UnorderedListOutlined />} onClick={() => setViewMode('list')}>
+              返回列表
+            </Button>
+          </Space>
         }
         className={styles.card}
       >
         <div className={styles.practiceContainer}>
           <div className={styles.questionHeader}>
-            <Space>
+            <Space wrap>
               <Tag color={questionTypeMap[currentQuestion?.type]?.color}>
                 {questionTypeMap[currentQuestion?.type]?.label}
+              </Tag>
+              <Tag color="blue">
+                {categories.find(c => c.id === currentQuestion?.categoryId)?.name || '未分类'}
               </Tag>
               <Text type="secondary">
                 第 {currentIndex + 1} / {filteredWrongQuestions.length} 题
               </Text>
-              <Tag color="red">错题次数：{currentWrong?.wrongCount}</Tag>
+              <Tooltip title="做错次数">
+                <Tag color="red">
+                  <ExclamationCircleOutlined /> 做错 {currentWrong?.wrongCount || 1} 次
+                </Tag>
+              </Tooltip>
+              <Tooltip title="首次出错">
+                <Text type="secondary">
+                  <ClockCircleOutlined /> {formatDate(currentWrong?.firstWrongTime || currentWrong?.addTime)}
+                </Text>
+              </Tooltip>
             </Space>
             <Space>
               <Button
@@ -403,7 +997,7 @@ function WrongBook() {
                 onClick={handleRedo}
                 size="small"
               >
-                重新作答
+                重置答案
               </Button>
               <Popconfirm
                 title="确定移除此题？"
@@ -427,7 +1021,13 @@ function WrongBook() {
           </Title>
 
           <div className={styles.optionsContainer}>
-            {renderOptions()}
+            {renderOptions(
+              currentQuestion,
+              userAnswer,
+              submitted,
+              handleSingleSelect,
+              handleMultipleChange
+            )}
           </div>
 
           {submitted && (
@@ -441,6 +1041,12 @@ function WrongBook() {
                 <Title level={5}>答案解析</Title>
                 <p>
                   正确答案：<Text strong>{currentQuestion.answer.join('、')}</Text>
+                </p>
+                <p>
+                  你的答案：
+                  <Text strong style={{ color: isCorrect ? '#3f8600' : '#cf1322' }}>
+                    {userAnswer.length > 0 ? userAnswer.join('、') : '未作答'}
+                  </Text>
                 </p>
                 <p className={styles.explanationText}>
                   {currentQuestion.explanation}
@@ -486,7 +1092,7 @@ function WrongBook() {
               onClick={handleNext}
               disabled={currentIndex === filteredWrongQuestions.length - 1}
             >
-              下一题
+              跳过
             </Button>
           </div>
         </div>

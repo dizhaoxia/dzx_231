@@ -30,6 +30,14 @@
   font-size: 14px;
 }
 
+.batchBar {
+  margin-bottom: 12px;
+  padding: 8px 16px;
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 6px;
+}
+
 .table {
   margin-top: 16px;
 }
@@ -59,4 +67,49 @@
 
 .optionItem :global(.ant-input) {
   flex: 1;
+}
+
+.draftList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.draftItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: #fafafa;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
+}
+
+.draftItem:hover {
+  border-color: #d9d9d9;
+}
+
+.draftContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.draftQuestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.draftQuestion span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draftTime {
+  font-size: 12px;
+  color: #999;
 }
