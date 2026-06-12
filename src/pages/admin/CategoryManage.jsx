@@ -24,6 +24,7 @@ import {
 } from '@ant-design/icons'
 import { useCategoryStore } from '../../stores/categoryStore'
 import { useQuestionStore } from '../../stores/questionStore'
+import { useOperationLogStore } from '../../stores/operationLogStore'
 import styles from './CategoryManage.module.css'
 
 const { Option } = Select
@@ -39,6 +40,7 @@ function CategoryManage() {
     getCategoryTree
   } = useCategoryStore()
   const { getQuestionsByCategory, deleteQuestionsByCategory } = useQuestionStore()
+  const { addLog, LOG_ACTIONS } = useOperationLogStore()
 
   const [modalVisible, setModalVisible] = useState(false)
   const [editingCategory, setEditingCategory] = useState(null)
@@ -85,11 +87,13 @@ function CategoryManage() {
             await deleteQuestionsByCategory(cid)
           }
           await deleteCategory(id)
+          addLog(LOG_ACTIONS.CATEGORY_DELETE, { categoryId: id, deletedQuestionsCount: totalQuestions, deletedSubCategories: childIds.length })
           message.success('删除成功')
         }
       })
     } else {
       await deleteCategory(id)
+      addLog(LOG_ACTIONS.CATEGORY_DELETE, { categoryId: id, deletedQuestionsCount: 0, deletedSubCategories: 0 })
       message.success('删除成功')
     }
   }
@@ -97,7 +101,9 @@ function CategoryManage() {
   const handleToggleEnabled = async (id) => {
     await toggleCategoryEnabled(id)
     const cat = categories.find(c => c.id === id)
-    message.success(cat?.enabled !== false ? '已禁用分类' : '已启用分类')
+    const newStatus = cat?.enabled === false
+    addLog(LOG_ACTIONS.CATEGORY_STATUS_TOGGLE, { categoryId: id, status: newStatus ? 'disabled' : 'enabled' })
+    message.success(newStatus ? '已禁用分类' : '已启用分类')
   }
 
   const handleMoveUp = async (record) => {
@@ -109,6 +115,7 @@ function CategoryManage() {
     const sortedIds = siblings.map(s => s.id)
     ;[sortedIds[idx - 1], sortedIds[idx]] = [sortedIds[idx], sortedIds[idx - 1]]
     await sortCategories(sortedIds)
+    addLog(LOG_ACTIONS.CATEGORY_SORT, { categoryId: record.id, direction: 'up', order: sortedIds })
     message.success('排序已更新')
   }
 
@@ -121,6 +128,7 @@ function CategoryManage() {
     const sortedIds = siblings.map(s => s.id)
     ;[sortedIds[idx], sortedIds[idx + 1]] = [sortedIds[idx + 1], sortedIds[idx]]
     await sortCategories(sortedIds)
+    addLog(LOG_ACTIONS.CATEGORY_SORT, { categoryId: record.id, direction: 'down', order: sortedIds })
     message.success('排序已更新')
   }
 
@@ -137,6 +145,7 @@ function CategoryManage() {
           message.error(result.message)
           return
         }
+        addLog(LOG_ACTIONS.CATEGORY_UPDATE, { categoryId: editingCategory.id, name, parentId, enabled })
         message.success('修改成功')
       } else {
         const result = await addCategory(name, parentId)
@@ -144,9 +153,11 @@ function CategoryManage() {
           message.error(result.message)
           return
         }
+        let createdId = result.category?.id
         if (!enabled && result.category) {
           await updateCategory(result.category.id, { enabled: false })
         }
+        addLog(LOG_ACTIONS.CATEGORY_CREATE, { categoryId: createdId, name, parentId, enabled })
         message.success('添加成功')
       }
 

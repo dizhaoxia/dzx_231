@@ -11,7 +11,9 @@ import {
   Empty,
   message,
   Space,
-  Result
+  Result,
+  Alert,
+  Segmented
 } from 'antd'
 import {
   LeftOutlined,
@@ -19,11 +21,14 @@ import {
   CheckOutlined,
   BookOutlined,
   PlusOutlined,
-  MinusOutlined
+  MinusOutlined,
+  DeleteOutlined
 } from '@ant-design/icons'
 import { useCategoryStore } from '../../stores/categoryStore'
 import { useQuestionStore } from '../../stores/questionStore'
-import { useWrongQuestionStore } from '../../stores/wrongQuestionStore'
+import { useWrongQuestionStore, WRONG_TYPES, wrongTypeLabels } from '../../stores/wrongQuestionStore'
+import { useExamStore } from '../../stores/examStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import styles from './Practice.module.css'
 
 const { Sider, Content } = Layout
@@ -38,12 +43,19 @@ const questionTypeMap = {
 function Practice() {
   const { categories, selectedCategoryId, setSelectedCategory } = useCategoryStore()
   const { getQuestionsByCategory } = useQuestionStore()
-  const { addWrongQuestion, removeWrongQuestion, isWrongQuestion } = useWrongQuestionStore()
+  const { addWrongQuestion, removeWrongQuestion, isWrongQuestion, getWrongQuestionById, getHighFrequencyWrong } = useWrongQuestionStore()
+  const { savePracticeProgress, getPracticeProgress, clearPracticeProgress } = useExamStore()
+  const { settings, getFontSize } = useSettingsStore()
 
   const [currentIndex, setCurrentIndex] = useState(0)
   const [userAnswer, setUserAnswer] = useState([])
   const [submitted, setSubmitted] = useState(false)
   const [isCorrect, setIsCorrect] = useState(false)
+  const [answersMap, setAnswersMap] = useState({})
+  const [showResult, setShowResult] = useState(false)
+  const [selectedWrongType, setSelectedWrongType] = useState(null)
+
+  const fontSize = useMemo(() => getFontSize(), [getFontSize])
 
   const questions = useMemo(() => {
     if (!selectedCategoryId) return []
@@ -52,21 +64,87 @@ function Practice() {
 
   const currentQuestion = questions[currentIndex]
 
+  const highFrequencyWrong = useMemo(() => {
+    if (!currentQuestion || !settings.showHighFrequencyTips) return null
+    const wrong = getWrongQuestionById(currentQuestion.id)
+    if (wrong && wrong.wrongCount >= 3) {
+      return wrong
+    }
+    return null
+  }, [currentQuestion, settings.showHighFrequencyTips, getWrongQuestionById])
+
   useEffect(() => {
-    setCurrentIndex(0)
-    setUserAnswer([])
-    setSubmitted(false)
-    setIsCorrect(false)
+    if (!selectedCategoryId) return
+    const restoreProgress = async () => {
+      const progress = await getPracticeProgress(selectedCategoryId)
+      if (progress && progress.questionIndex !== undefined && progress.questionIndex < questions.length) {
+        setCurrentIndex(progress.questionIndex)
+        setAnswersMap(progress.answers || {})
+        const savedAnswer = (progress.answers && progress.answers[questions[progress.questionIndex]?.id]) || []
+        setUserAnswer(savedAnswer)
+        message.info(`已恢复上次刷题进度，第 ${progress.questionIndex + 1} 题`)
+      }
+    }
+    restoreProgress()
   }, [selectedCategoryId])
 
   useEffect(() => {
     setUserAnswer([])
     setSubmitted(false)
     setIsCorrect(false)
+    setShowResult(false)
+    setSelectedWrongType(null)
   }, [currentIndex])
+
+  useEffect(() => {
+    if (!selectedCategoryId || !currentQuestion) return
+    const newAnswersMap = { ...answersMap, [currentQuestion.id]: userAnswer }
+    setAnswersMap(newAnswersMap)
+    savePracticeProgress(selectedCategoryId, currentIndex, newAnswersMap)
+  }, [currentIndex, userAnswer, selectedCategoryId, currentQuestion])
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') return
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        handlePrev()
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        if (submitted) {
+          handleNext()
+        }
+      } else if (['A', 'B', 'C', 'D'].includes(e.key.toUpperCase())) {
+        if (!currentQuestion) return
+        const questionType = currentQuestion.type
+        if (questionType === 'single' || questionType === 'judge') {
+          if (!submitted) {
+            const key = e.key.toUpperCase()
+            const optionIndex = key.charCodeAt(0) - 65
+            if (currentQuestion.options && optionIndex < currentQuestion.options.length) {
+              setUserAnswer([key])
+            }
+          }
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [currentIndex, submitted, currentQuestion])
 
   const handleCategoryChange = ({ key }) => {
     setSelectedCategory(key)
+    setCurrentIndex(0)
+    setUserAnswer([])
+    setSubmitted(false)
+    setIsCorrect(false)
+    setAnswersMap({})
+    setShowResult(false)
+    setSelectedWrongType(null)
   }
 
   const handleSingleSelect = (e) => {
@@ -91,6 +169,7 @@ function Practice() {
 
     setIsCorrect(correct)
     setSubmitted(true)
+    setShowResult(settings.showAnswerInstantly)
 
     if (!correct) {
       addWrongQuestion(currentQuestion.id, userAnswer)
@@ -119,6 +198,24 @@ function Practice() {
     }
   }
 
+  const handleClearProgress = async () => {
+    await clearPracticeProgress(selectedCategoryId)
+    message.success('已清除刷题进度')
+  }
+
+  const handleWrongTypeSelect = (type) => {
+    setSelectedWrongType(type)
+    addWrongQuestion(currentQuestion.id, userAnswer, type)
+    message.success('已记录错误类型')
+  }
+
+  const handleShowResult = () => {
+    setShowResult(true)
+    if (!isCorrect) {
+      addWrongQuestion(currentQuestion.id, userAnswer)
+    }
+  }
+
   const menuItems = categories.map(cat => ({
     key: cat.id,
     icon: <BookOutlined />,
@@ -144,7 +241,7 @@ function Practice() {
             const isUserOption = userAnswer.includes(optionLabel)
 
             let optionClass = styles.optionItem
-            if (submitted) {
+            if (submitted && showResult) {
               if (isCorrectOption) {
                 optionClass += ' ' + styles.correctOption
               } else if (isUserOption && !isCorrectOption) {
@@ -154,8 +251,8 @@ function Practice() {
 
             return (
               <Radio key={idx} value={optionLabel} className={optionClass}>
-                <span className={styles.optionLabel}>{optionLabel}.</span>
-                <span className={styles.optionText}>{opt}</span>
+                <span className={styles.optionLabel} style={{ fontSize: fontSize.option }}>{optionLabel}.</span>
+                <span className={styles.optionText} style={{ fontSize: fontSize.option }}>{opt}</span>
               </Radio>
             )
           })}
@@ -176,7 +273,7 @@ function Practice() {
           const isUserOption = userAnswer.includes(optionLabel)
 
           let optionClass = styles.optionItem
-          if (submitted) {
+          if (submitted && showResult) {
             if (isCorrectOption) {
               optionClass += ' ' + styles.correctOption
             } else if (isUserOption && !isCorrectOption) {
@@ -186,8 +283,8 @@ function Practice() {
 
           return (
             <Checkbox key={idx} value={optionLabel} className={optionClass}>
-              <span className={styles.optionLabel}>{optionLabel}.</span>
-              <span className={styles.optionText}>{opt}</span>
+              <span className={styles.optionLabel} style={{ fontSize: fontSize.option }}>{optionLabel}.</span>
+              <span className={styles.optionText} style={{ fontSize: fontSize.option }}>{opt}</span>
             </Checkbox>
           )
         })}
@@ -234,13 +331,23 @@ function Practice() {
         <Content className={styles.content}>
           <Card className={styles.questionCard}>
             <div className={styles.questionHeader}>
-              <Space>
-                <Tag color={questionTypeMap[currentQuestion.type]?.color}>
-                  {questionTypeMap[currentQuestion.type]?.label}
-                </Tag>
-                <Text type="secondary">
-                  第 {currentIndex + 1} / {questions.length} 题
-                </Text>
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Space>
+                  <Tag color={questionTypeMap[currentQuestion.type]?.color}>
+                    {questionTypeMap[currentQuestion.type]?.label}
+                  </Tag>
+                  <Text type="secondary">
+                    第 {currentIndex + 1} / {questions.length} 题
+                  </Text>
+                </Space>
+                {highFrequencyWrong && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={`⚠️ 高频易错题目，请注意仔细作答！该题已做错 ${highFrequencyWrong.wrongCount} 次`}
+                    style={{ marginTop: 8 }}
+                  />
+                )}
               </Space>
               <Button
                 icon={isWrongQuestion(currentQuestion.id) ? <MinusOutlined /> : <PlusOutlined />}
@@ -251,7 +358,7 @@ function Practice() {
               </Button>
             </div>
 
-            <Title level={4} className={styles.questionTitle}>
+            <Title level={4} className={styles.questionTitle} style={{ fontSize: fontSize.question }}>
               {currentQuestion.question}
             </Title>
 
@@ -259,13 +366,43 @@ function Practice() {
               {renderOptions()}
             </div>
 
-            {submitted && (
+            {submitted && !showResult && !settings.showAnswerInstantly && (
+              <div className={styles.resultSection}>
+                <Alert
+                  type="info"
+                  showIcon
+                  message="答案已提交，可查看解析或继续下一题"
+                  action={
+                    <Button size="small" type="primary" onClick={handleShowResult}>
+                      查看解析
+                    </Button>
+                  }
+                />
+              </div>
+            )}
+
+            {submitted && showResult && (
               <div className={styles.resultSection}>
                 <Result
                   status={isCorrect ? 'success' : 'error'}
                   title={isCorrect ? '回答正确！' : '回答错误'}
                   className={styles.result}
                 />
+                {!isCorrect && (
+                  <div style={{ marginBottom: 16 }}>
+                    <Text type="secondary" style={{ marginBottom: 8, display: 'block' }}>
+                      请选择错误类型（可选）：
+                    </Text>
+                    <Segmented
+                      value={selectedWrongType}
+                      onChange={handleWrongTypeSelect}
+                      options={Object.entries(wrongTypeLabels).map(([value, label]) => ({
+                        label,
+                        value
+                      }))}
+                    />
+                  </div>
+                )}
                 <div className={styles.explanation}>
                   <Title level={5}>答案解析</Title>
                   <Paragraph className={styles.explanationText}>
@@ -319,6 +456,14 @@ function Practice() {
               disabled={currentIndex === questions.length - 1}
             >
               下一题
+            </Button>
+
+            <Button
+              icon={<DeleteOutlined />}
+              onClick={handleClearProgress}
+              danger
+            >
+              清除进度
             </Button>
           </div>
         </div>

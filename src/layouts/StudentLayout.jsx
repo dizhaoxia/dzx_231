@@ -7,7 +7,8 @@ import {
   FormOutlined,
   BarChartOutlined,
   LogoutOutlined,
-  UserOutlined
+  UserOutlined,
+  SettingOutlined
 } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { useWrongQuestionStore } from '../stores/wrongQuestionStore'
@@ -21,6 +22,7 @@ function StudentLayout() {
   const location = useLocation()
   const { logout } = useAuthStore()
   const { wrongQuestions } = useWrongQuestionStore()
+  const pendingWrongCount = wrongQuestions.filter(w => !w.mastered).length
 
   const handleLogout = async () => {
     await logout()
@@ -41,12 +43,17 @@ function StudentLayout() {
     {
       key: '/student/wrong',
       icon: <FormOutlined />,
-      label: wrongQuestions.length > 0 ? `错题本 (${wrongQuestions.length})` : '错题本'
+      label: pendingWrongCount > 0 ? `错题本 (${pendingWrongCount})` : '错题本'
     },
     {
       key: '/student/statistics',
       icon: <BarChartOutlined />,
       label: '数据统计'
+    },
+    {
+      key: '/student/settings',
+      icon: <SettingOutlined />,
+      label: '偏好设置'
     }
   ]
 
@@ -56,6 +63,7 @@ function StudentLayout() {
     if (path.startsWith('/student/exam')) return '/student/exam'
     if (path.startsWith('/student/wrong')) return '/student/wrong'
     if (path.startsWith('/student/statistics')) return '/student/statistics'
+    if (path.startsWith('/student/settings')) return '/student/settings'
     return '/student/practice'
   }
 

@@ -1,13 +1,16 @@
 import React from 'react'
-import { Layout, Menu, Button, Typography } from 'antd'
+import { Layout, Menu, Button, Typography, Badge } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   AppstoreOutlined,
   QuestionCircleOutlined,
   LogoutOutlined,
-  SettingOutlined
+  SettingOutlined,
+  FileTextOutlined,
+  DatabaseOutlined
 } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
+import { useOperationLogStore } from '../stores/operationLogStore'
 import styles from './AdminLayout.module.css'
 
 const { Sider, Header, Content } = Layout
@@ -17,6 +20,7 @@ function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { logout } = useAuthStore()
+  const { logs } = useOperationLogStore()
 
   const handleLogout = async () => {
     await logout()
@@ -33,6 +37,16 @@ function AdminLayout() {
       key: '/admin/questions',
       icon: <QuestionCircleOutlined />,
       label: '题目管理'
+    },
+    {
+      key: '/admin/logs',
+      icon: <FileTextOutlined />,
+      label: logs.length > 0 ? `操作日志 (${logs.length})` : '操作日志'
+    },
+    {
+      key: '/admin/backup',
+      icon: <DatabaseOutlined />,
+      label: '备份与恢复'
     }
   ]
 
@@ -40,6 +54,8 @@ function AdminLayout() {
     const path = location.pathname
     if (path.startsWith('/admin/categories')) return '/admin/categories'
     if (path.startsWith('/admin/questions')) return '/admin/questions'
+    if (path.startsWith('/admin/logs')) return '/admin/logs'
+    if (path.startsWith('/admin/backup')) return '/admin/backup'
     return '/admin/categories'
   }
 

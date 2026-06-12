@@ -21,7 +21,8 @@ import {
   Tooltip,
   Divider,
   Alert,
-  Spin
+  Spin,
+  Switch
 } from 'antd'
 import {
   ClockCircleOutlined,
@@ -38,6 +39,7 @@ import { useCategoryStore } from '../../stores/categoryStore'
 import { useQuestionStore } from '../../stores/questionStore'
 import { useExamStore } from '../../stores/examStore'
 import { useWrongQuestionStore } from '../../stores/wrongQuestionStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import styles from './Exam.module.css'
 
 const { Title, Text } = Typography
@@ -63,9 +65,11 @@ function Exam() {
     setFiveMinAlerted,
     saveAnswerCache,
     hasCachedExam,
-    recoverCachedExam
+    recoverCachedExam,
+    getShuffledOptions
   } = useExamStore()
   const { addWrongQuestion } = useWrongQuestionStore()
+  const { settings, getFontSize } = useSettingsStore()
 
   const [examStarted, setExamStarted] = useState(false)
   const [examFinished, setExamFinished] = useState(false)
@@ -80,6 +84,8 @@ function Exam() {
 
   const enabledCategories = getEnabledCategories()
 
+  const fontSize = getFontSize()
+
   const examQuestions = useMemo(() => {
     if (!currentExam) return []
     return currentExam.questionIds.map(id => getQuestionById(id)).filter(Boolean)
@@ -91,6 +97,17 @@ function Exam() {
     const checkCache = async () => {
       try {
         if (currentExam && !currentExam.submitted) {
+          const elapsed = Date.now() - currentExam.startTime
+          const remaining = Math.max(0, currentExam.duration - elapsed)
+          if (remaining <= 0) {
+            message.warning('考试已超时，自动交卷')
+            const questions = currentExam.questionIds.map(id => getQuestionById(id)).filter(Boolean)
+            await submitExam(questions)
+            setExamFinished(true)
+            setExamStarted(true)
+            setCheckingCache(false)
+            return
+          }
           setRecoveredExam(currentExam)
           setShowRecovery(true)
           setCheckingCache(false)
@@ -100,6 +117,17 @@ function Exam() {
         if (exists) {
           const cached = await recoverCachedExam()
           if (cached) {
+            const elapsed = Date.now() - cached.startTime
+            const remaining = Math.max(0, cached.duration - elapsed)
+            if (remaining <= 0) {
+              message.warning('考试已超时，自动交卷')
+              const questions = cached.questionIds.map(id => getQuestionById(id)).filter(Boolean)
+              await submitExam(questions)
+              setExamFinished(true)
+              setExamStarted(true)
+              setCheckingCache(false)
+              return
+            }
             setRecoveredExam(cached)
             setShowRecovery(true)
           }
@@ -178,6 +206,37 @@ function Exam() {
     }
   }, [])
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!examStarted || examFinished) return
+
+      const activeElement = document.activeElement
+      const isInputFocused = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.isContentEditable
+      )
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        setCurrentIndex(prev => Math.max(0, prev - 1))
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        setCurrentIndex(prev => Math.min(examQuestions.length - 1, prev + 1))
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
+        e.preventDefault()
+        handleToggleMark()
+      } else if (e.key === 'Enter' && !isInputFocused) {
+        e.preventDefault()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [examStarted, examFinished, examQuestions.length, currentExam])
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
@@ -187,7 +246,7 @@ function Exam() {
   const handleStartExam = async () => {
     try {
       const values = await form.validateFields()
-      const { categoryIds, questionTypes, questionCount, duration } = values
+      const { categoryIds, questionTypes, questionCount, duration, shuffleQuestions, shuffleOptions } = values
 
       const effectiveCategoryIds = categoryIds && categoryIds.length > 0
         ? categoryIds
@@ -224,7 +283,7 @@ function Exam() {
         return
       }
 
-      await startExam(questions, duration)
+      await startExam(questions, duration, { shuffleQuestions, shuffleOptions })
       setTimeLeft(duration * 60)
       setExamStarted(true)
       setExamFinished(false)
@@ -240,6 +299,15 @@ function Exam() {
     if (recoveredExam) {
       const elapsed = Date.now() - recoveredExam.startTime
       const remaining = Math.max(0, recoveredExam.duration - elapsed)
+      if (remaining <= 0) {
+        message.warning('考试已超时，自动交卷')
+        const questions = recoveredExam.questionIds.map(id => getQuestionById(id)).filter(Boolean)
+        submitExam(questions)
+        setExamFinished(true)
+        setExamStarted(true)
+        setShowRecovery(false)
+        return
+      }
       setTimeLeft(Math.floor(remaining / 1000))
       setExamStarted(true)
       setExamFinished(false)
@@ -380,6 +448,10 @@ function Exam() {
     if (!currentQuestion) return null
 
     const { type, options } = currentQuestion
+    const shuffledOptions = currentExam?.shuffleOptions
+      ? getShuffledOptions(currentQuestion.id, currentQuestion)
+      : null
+    const isShuffled = shuffledOptions && Array.isArray(shuffledOptions[0]) === false && typeof shuffledOptions[0] === 'object'
 
     if (type === 'single' || type === 'judge') {
       return (
@@ -389,9 +461,11 @@ function Exam() {
           className={styles.optionsGroup}
           disabled={examFinished}
         >
-          {options.map((opt, idx) => {
+          {(isShuffled ? shuffledOptions : options).map((opt, idx) => {
             const optionLabel = String.fromCharCode(65 + idx)
-            const isCorrectOption = currentQuestion.answer.includes(optionLabel)
+            const originalLabel = isShuffled ? opt.originalLabel : optionLabel
+            const optionText = isShuffled ? opt.text : opt
+            const isCorrectOption = currentQuestion.answer.includes(originalLabel)
             const isUserOption = currentAnswer.includes(optionLabel)
 
             let optionClass = styles.optionItem
@@ -405,8 +479,8 @@ function Exam() {
 
             return (
               <Radio key={idx} value={optionLabel} className={optionClass}>
-                <span className={styles.optionLabel}>{optionLabel}.</span>
-                <span className={styles.optionText}>{opt}</span>
+                <span className={styles.optionLabel} style={{ fontSize: fontSize.option }}>{optionLabel}.</span>
+                <span className={styles.optionText} style={{ fontSize: fontSize.option }}>{optionText}</span>
               </Radio>
             )
           })}
@@ -421,9 +495,11 @@ function Exam() {
         className={styles.optionsGroup}
         disabled={examFinished}
       >
-        {options.map((opt, idx) => {
+        {(isShuffled ? shuffledOptions : options).map((opt, idx) => {
           const optionLabel = String.fromCharCode(65 + idx)
-          const isCorrectOption = currentQuestion.answer.includes(optionLabel)
+          const originalLabel = isShuffled ? opt.originalLabel : optionLabel
+          const optionText = isShuffled ? opt.text : opt
+          const isCorrectOption = currentQuestion.answer.includes(originalLabel)
           const isUserOption = currentAnswer.includes(optionLabel)
 
           let optionClass = styles.optionItem
@@ -437,8 +513,8 @@ function Exam() {
 
           return (
             <Checkbox key={idx} value={optionLabel} className={optionClass}>
-              <span className={styles.optionLabel}>{optionLabel}.</span>
-              <span className={styles.optionText}>{opt}</span>
+              <span className={styles.optionLabel} style={{ fontSize: fontSize.option }}>{optionLabel}.</span>
+              <span className={styles.optionText} style={{ fontSize: fontSize.option }}>{optionText}</span>
             </Checkbox>
           )
         })}
@@ -511,7 +587,7 @@ function Exam() {
 
   if (checkingCache) {
     return (
-      <div className={styles.container}>
+      <div className={styles.container} style={{ fontSize: fontSize.question }}>
         <Card className={styles.startCard}>
           <div style={{ textAlign: 'center', padding: '40px 0' }}>
             <Spin size="large" tip="检查考试记录..." />
@@ -526,7 +602,7 @@ function Exam() {
       const elapsed = Date.now() - recoveredExam.startTime
       const remaining = Math.max(0, recoveredExam.duration - elapsed)
       return (
-        <div className={styles.container}>
+        <div className={styles.container} style={{ fontSize: fontSize.question }}>
           <Card className={styles.startCard}>
             <Alert
               message="检测到未完成的考试"
@@ -554,7 +630,7 @@ function Exam() {
     }
 
     return (
-      <div className={styles.container}>
+      <div className={styles.container} style={{ fontSize: fontSize.question }}>
         <Card
           title={
             <span className={styles.cardTitle}>
@@ -626,6 +702,24 @@ function Exam() {
               />
             </Form.Item>
 
+            <Form.Item
+              name="shuffleQuestions"
+              label="随机打乱题目顺序"
+              valuePropName="checked"
+              initialValue={settings.shuffleQuestions}
+            >
+              <Switch />
+            </Form.Item>
+
+            <Form.Item
+              name="shuffleOptions"
+              label="随机打乱选项顺序"
+              valuePropName="checked"
+              initialValue={settings.shuffleOptions}
+            >
+              <Switch />
+            </Form.Item>
+
             <Button
               type="primary"
               size="large"
@@ -649,7 +743,7 @@ function Exam() {
     const totalCount = currentExam.totalCount || 0
 
     return (
-      <div className={styles.container}>
+      <div className={styles.container} style={{ fontSize: fontSize.question }}>
         <Card className={styles.resultCard}>
           <Result
             status={accuracy >= 60 ? 'success' : 'warning'}
@@ -723,7 +817,7 @@ function Exam() {
                     </Space>
                   </div>
                   <div className={styles.resultQuestionText}>
-                    <Text strong>{q.question}</Text>
+                    <Text strong style={{ fontSize: fontSize.question }}>{q.question}</Text>
                   </div>
                   <div className={styles.resultOptions}>
                     {q.options.map((opt, oIdx) => {
@@ -735,7 +829,7 @@ function Exam() {
                       if (isUserOpt && !isCorrectOpt) optClass += ' ' + styles.resultWrongOption
                       return (
                         <div key={oIdx} className={optClass}>
-                          <Text>
+                          <Text style={{ fontSize: fontSize.option }}>
                             <strong>{label}.</strong> {opt}
                             {isCorrectOpt && <Tag color="green" style={{ marginLeft: 8 }}>正确答案</Tag>}
                             {isUserOpt && !isCorrectOpt && <Tag color="red" style={{ marginLeft: 8 }}>你的选择</Tag>}
@@ -783,7 +877,7 @@ function Exam() {
   }
 
   return (
-    <div className={styles.container}>
+    <div className={styles.container} style={{ fontSize: fontSize.question }}>
       <div className={styles.examLayout}>
         <div className={styles.questionArea}>
           <Card className={styles.questionCard}>
@@ -807,7 +901,7 @@ function Exam() {
               </div>
             </div>
 
-            <Title level={4} className={styles.questionTitle}>
+            <Title level={4} className={styles.questionTitle} style={{ fontSize: fontSize.title }}>
               {currentQuestion?.question}
             </Title>
 

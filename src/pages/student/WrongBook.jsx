@@ -39,8 +39,10 @@ import {
 } from '@ant-design/icons'
 import { useCategoryStore } from '../../stores/categoryStore'
 import { useQuestionStore } from '../../stores/questionStore'
-import { useWrongQuestionStore } from '../../stores/wrongQuestionStore'
+import { useWrongQuestionStore, WRONG_TYPES, wrongTypeLabels } from '../../stores/wrongQuestionStore'
 import { useExamStore } from '../../stores/examStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { useOperationLogStore, LOG_ACTIONS } from '../../stores/operationLogStore'
 import styles from './WrongBook.module.css'
 
 const { Title, Text } = Typography
@@ -53,16 +55,27 @@ const questionTypeMap = {
 }
 
 function WrongBook() {
-  const { categories } = useCategoryStore()
+  const { categories, getCategoryName } = useCategoryStore()
   const { getQuestionById, getRandomQuestions } = useQuestionStore()
   const {
     wrongQuestions,
     removeWrongQuestion,
     clearAllWrong,
     batchRemoveWrongQuestions,
-    getWrongCount
+    getWrongCount,
+    getWrongTypeStats,
+    getWeakPointReport,
+    markAsMastered,
+    unmarkMastered,
+    isMastered,
+    getMasteredCount,
+    getTotalWrongCount,
+    exportWrongQuestions,
+    setWrongType
   } = useWrongQuestionStore()
   const { startWrongExam, currentExam, submitExam, clearCurrentExam, setAnswer, toggleMark } = useExamStore()
+  const { getFontSize } = useSettingsStore()
+  const { addLog } = useOperationLogStore()
 
   const [viewMode, setViewMode] = useState('list')
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -78,9 +91,14 @@ function WrongBook() {
   const [examStarted, setExamStarted] = useState(false)
   const [examFinished, setExamFinished] = useState(false)
   const [examCurrentIndex, setExamCurrentIndex] = useState(0)
+  const [showMastered, setShowMastered] = useState(false)
 
   const filteredWrongQuestions = useMemo(() => {
     let result = [...wrongQuestions]
+
+    if (!showMastered) {
+      result = result.filter(w => !w.mastered)
+    }
 
     if (filterCategory) {
       result = result.filter(w => {
@@ -101,7 +119,13 @@ function WrongBook() {
     }
 
     return result.sort((a, b) => (b.wrongCount || 1) - (a.wrongCount || 1))
-  }, [wrongQuestions, filterCategory, filterType, filterMinCount, getQuestionById])
+  }, [wrongQuestions, showMastered, filterCategory, filterType, filterMinCount, getQuestionById])
+
+  const fontSize = useMemo(() => getFontSize(), [getFontSize])
+
+  const wrongTypeStats = useMemo(() => getWrongTypeStats(), [getWrongTypeStats])
+
+  const weakPointReport = useMemo(() => getWeakPointReport(getQuestionById, getCategoryName), [getWeakPointReport, getQuestionById, getCategoryName])
 
   const examQuestions = useMemo(() => {
     if (!currentExam || !currentExam.isWrongExam) return []
@@ -195,6 +219,38 @@ function WrongBook() {
     if (currentIndex >= filteredWrongQuestions.length - 1 && currentIndex > 0) {
       setCurrentIndex(currentIndex - 1)
     }
+  }
+
+  const handleToggleMastered = async (questionId) => {
+    const mastered = isMastered(questionId)
+    if (mastered) {
+      await unmarkMastered(questionId)
+      message.success('已取消掌握')
+    } else {
+      await markAsMastered(questionId)
+      message.success('已标记为掌握')
+      await addLog(LOG_ACTIONS.WRONG_QUESTION_MASTERED, { questionId })
+    }
+  }
+
+  const handleWrongTypeChange = async (questionId, wrongType) => {
+    await setWrongType(questionId, wrongType)
+    message.success('错误类型已更新')
+  }
+
+  const handleExportWrongQuestions = () => {
+    const jsonData = exportWrongQuestions(getQuestionById, getCategoryName, 'json')
+    const blob = new Blob([jsonData], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `错题本_${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    addLog(LOG_ACTIONS.WRONG_QUESTION_EXPORT, { count: wrongQuestions.length })
+    message.success('错题导出成功')
   }
 
   const handleBatchRemove = () => {
@@ -346,8 +402,8 @@ function WrongBook() {
 
             return (
               <Radio key={idx} value={optionLabel} className={optionClass}>
-                <span className={styles.optionLabel}>{optionLabel}.</span>
-                <span className={styles.optionText}>{opt}</span>
+                <span className={styles.optionLabel} style={{ fontSize: fontSize.option }}>{optionLabel}.</span>
+                <span className={styles.optionText} style={{ fontSize: fontSize.option }}>{opt}</span>
               </Radio>
             )
           })}
@@ -376,8 +432,8 @@ function WrongBook() {
 
           return (
             <Checkbox key={idx} value={optionLabel} className={optionClass}>
-              <span className={styles.optionLabel}>{optionLabel}.</span>
-              <span className={styles.optionText}>{opt}</span>
+              <span className={styles.optionLabel} style={{ fontSize: fontSize.option }}>{optionLabel}.</span>
+              <span className={styles.optionText} style={{ fontSize: fontSize.option }}>{opt}</span>
             </Checkbox>
           )
         })}
@@ -450,7 +506,7 @@ function WrongBook() {
                       </Space>
                     </div>
                     <div className={styles.resultQuestionText}>
-                      <Text strong>{q.question}</Text>
+                      <Text strong style={{ fontSize: fontSize.question }}>{q.question}</Text>
                     </div>
                     <div className={styles.resultAnswer}>
                       <div>
@@ -510,7 +566,7 @@ function WrongBook() {
                   </Text>
                 </Space>
               </div>
-              <Title level={4} className={styles.questionTitle}>
+              <Title level={4} className={styles.questionTitle} style={{ fontSize: fontSize.question }}>
                 {currentExamQuestion?.question}
               </Title>
               <div className={styles.optionsContainer}>
@@ -593,7 +649,7 @@ function WrongBook() {
             </span>
           }
           extra={
-            <Space>
+            <Space wrap>
               <Select
                 placeholder="筛选分类"
                 style={{ width: 140 }}
@@ -616,6 +672,19 @@ function WrongBook() {
                 <Option value="multiple">多选题</Option>
                 <Option value="judge">判断题</Option>
               </Select>
+              <Checkbox
+                checked={showMastered}
+                onChange={(e) => setShowMastered(e.target.checked)}
+              >
+                显示已掌握
+              </Checkbox>
+              <Button
+                icon={<FileTextOutlined />}
+                onClick={handleExportWrongQuestions}
+                disabled={wrongQuestions.length === 0}
+              >
+                导出错题
+              </Button>
             </Space>
           }
           className={styles.card}
@@ -681,6 +750,19 @@ function WrongBook() {
                 <Option value={3}>≥ 3 次</Option>
                 <Option value={5}>≥ 5 次</Option>
               </Select>
+              <Checkbox
+                checked={showMastered}
+                onChange={(e) => setShowMastered(e.target.checked)}
+              >
+                显示已掌握
+              </Checkbox>
+              <Button
+                icon={<FileTextOutlined />}
+                onClick={handleExportWrongQuestions}
+                disabled={wrongQuestions.length === 0}
+              >
+                导出错题
+              </Button>
               <Button
                 icon={<RedoOutlined />}
                 onClick={() => {
@@ -732,9 +814,19 @@ function WrongBook() {
                 <Card size="small" className={styles.statCard}>
                   <Statistic
                     title="错题总数"
-                    value={getWrongCount()}
+                    value={getTotalWrongCount()}
                     suffix="道"
                     valueStyle={{ color: '#ff4d4f' }}
+                  />
+                </Card>
+              </Col>
+              <Col xs={12} sm={6}>
+                <Card size="small" className={styles.statCard}>
+                  <Statistic
+                    title="已掌握"
+                    value={getMasteredCount()}
+                    suffix="道"
+                    valueStyle={{ color: '#52c41a' }}
                   />
                 </Card>
               </Col>
@@ -751,24 +843,79 @@ function WrongBook() {
               <Col xs={12} sm={6}>
                 <Card size="small" className={styles.statCard}>
                   <Statistic
-                    title="单选题"
-                    value={stats.typeCount.single || 0}
+                    title="未掌握"
+                    value={getWrongCount()}
                     suffix="道"
                     valueStyle={{ color: '#1890ff' }}
                   />
                 </Card>
               </Col>
-              <Col xs={12} sm={6}>
-                <Card size="small" className={styles.statCard}>
-                  <Statistic
-                    title="多选题"
-                    value={stats.typeCount.multiple || 0}
-                    suffix="道"
-                    valueStyle={{ color: '#52c41a' }}
-                  />
-                </Card>
-              </Col>
             </Row>
+          )}
+
+          {wrongQuestions.length > 0 && (
+            <Card
+              size="small"
+              title={
+                <Space>
+                  <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+                  <span>薄弱点分析</span>
+                </Space>
+              }
+              style={{ marginTop: 16 }}
+            >
+              <Row gutter={16}>
+                <Col xs={24} md={12}>
+                  <Title level={5} style={{ marginTop: 0 }}>错误类型分布</Title>
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary">总错题数：{weakPointReport.totalWrong} 道，累计做错 {weakPointReport.totalWrongTimes} 次</Text>
+                  </div>
+                  {Object.values(WRONG_TYPES).map(type => {
+                    const stat = wrongTypeStats[type]
+                    const percent = weakPointReport.totalWrong > 0 ? Math.round((stat?.count || 0) / weakPointReport.totalWrong * 100) : 0
+                    return (
+                      <div key={type} style={{ marginBottom: 8 }}>
+                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <Text>{wrongTypeLabels[type]}</Text>
+                          <Text type="secondary">{stat?.count || 0} 道 ({percent}%)</Text>
+                        </Space>
+                        <Progress
+                          percent={percent}
+                          showInfo={false}
+                          size="small"
+                          strokeColor={
+                            type === WRONG_TYPES.CONCEPT ? '#ff4d4f' :
+                            type === WRONG_TYPES.READING ? '#faad14' :
+                            type === WRONG_TYPES.KNOWLEDGE_GAP ? '#722ed1' :
+                            type === WRONG_TYPES.CARELESS ? '#1890ff' : '#8c8c8c'
+                          }
+                        />
+                      </div>
+                    )
+                  })}
+                </Col>
+                <Col xs={24} md={12}>
+                  <Title level={5} style={{ marginTop: 0 }}>Top 3 薄弱分类</Title>
+                  {weakPointReport.topWeakCategories.length > 0 ? (
+                    weakPointReport.topWeakCategories.map((cat, idx) => (
+                      <div key={cat.category} style={{ marginBottom: 12, padding: 8, background: idx === 0 ? '#fff1f0' : idx === 1 ? '#fff7e6' : '#e6f7ff', borderRadius: 4 }}>
+                        <Space>
+                          <Tag color={idx === 0 ? 'red' : idx === 1 ? 'orange' : 'blue'}>
+                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'} 第{idx + 1}名
+                          </Tag>
+                          <Text strong>{cat.category}</Text>
+                        </Space>
+                        <div style={{ marginTop: 4 }}>
+                          <Text type="secondary">错题 {cat.count} 道，累计做错 {cat.wrongCount} 次</Text>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <Text type="secondary">暂无数据</Text>
+                  )}
+                </Col>
+              </Row>
+            </Card>
           )}
 
           {hasSelected && (
@@ -800,6 +947,7 @@ function WrongBook() {
               if (!q) return null
               const category = categories.find(c => c.id === q.categoryId)
               const isSelected = selectedIds.includes(w.questionId)
+              const mastered = isMastered(w.questionId)
 
               return (
                 <div key={w.questionId} className={`${styles.wrongItem} ${isSelected ? styles.selectedItem : ''}`}>
@@ -819,6 +967,11 @@ function WrongBook() {
                         {questionTypeMap[q.type]?.label}
                       </Tag>
                       <Tag color="blue">{category?.name || '未分类'}</Tag>
+                      {mastered && (
+                        <Tag color="green">
+                          <CheckOutlined /> 已掌握
+                        </Tag>
+                      )}
                       <Tooltip title="做错次数">
                         <Tag color="red">
                           <ExclamationCircleOutlined /> 做错 {w.wrongCount || 1} 次
@@ -837,7 +990,25 @@ function WrongBook() {
                         </Tooltip>
                       )}
                     </Space>
-                    <Space>
+                    <Space wrap>
+                      <Select
+                        size="small"
+                        style={{ width: 120 }}
+                        value={w.wrongType || WRONG_TYPES.OTHER}
+                        onChange={(value) => handleWrongTypeChange(w.questionId, value)}
+                      >
+                        {Object.values(WRONG_TYPES).map(type => (
+                          <Option key={type} value={type}>{wrongTypeLabels[type]}</Option>
+                        ))}
+                      </Select>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<CheckOutlined />}
+                        onClick={() => handleToggleMastered(w.questionId)}
+                      >
+                        {mastered ? '取消掌握' : '标记已掌握'}
+                      </Button>
                       <Button
                         type="link"
                         size="small"
@@ -870,8 +1041,8 @@ function WrongBook() {
                     </Space>
                   </div>
                   <div className={styles.wrongItemQuestion}>
-                    <Text strong>第 {idx + 1} 题. </Text>
-                    {q.question}
+                    <Text strong style={{ fontSize: fontSize.question }}>第 {idx + 1} 题. </Text>
+                    <span style={{ fontSize: fontSize.question }}>{q.question}</span>
                   </div>
                   <div className={styles.wrongItemAnswer}>
                     <Text type="secondary">
@@ -1016,7 +1187,7 @@ function WrongBook() {
             </Space>
           </div>
 
-          <Title level={4} className={styles.questionTitle}>
+          <Title level={4} className={styles.questionTitle} style={{ fontSize: fontSize.question }}>
             {currentQuestion?.question}
           </Title>
 

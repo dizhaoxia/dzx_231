@@ -5,6 +5,8 @@ import { useCategoryStore } from './stores/categoryStore'
 import { useQuestionStore } from './stores/questionStore'
 import { useWrongQuestionStore } from './stores/wrongQuestionStore'
 import { useExamStore } from './stores/examStore'
+import { useOperationLogStore } from './stores/operationLogStore'
+import { useSettingsStore } from './stores/settingsStore'
 import { Spin } from 'antd'
 import RoleSelect from './pages/RoleSelect'
 import StudentLayout from './layouts/StudentLayout'
@@ -13,8 +15,11 @@ import Practice from './pages/student/Practice'
 import Exam from './pages/student/Exam'
 import WrongBook from './pages/student/WrongBook'
 import Statistics from './pages/student/Statistics'
+import Settings from './pages/student/Settings'
 import CategoryManage from './pages/admin/CategoryManage'
 import QuestionManage from './pages/admin/QuestionManage'
+import OperationLogs from './pages/admin/OperationLogs'
+import BackupManage from './pages/admin/BackupManage'
 import styles from './App.module.css'
 
 function App() {
@@ -23,6 +28,8 @@ function App() {
   const { isLoading: questionLoading, init: initQuestion } = useQuestionStore()
   const { isLoading: wrongLoading, init: initWrong } = useWrongQuestionStore()
   const { isLoading: examLoading, init: initExam } = useExamStore()
+  const { isLoading: logLoading, init: initLogs } = useOperationLogStore()
+  const { isLoading: settingsLoading, init: initSettings } = useSettingsStore()
 
   useEffect(() => {
     initAuth()
@@ -30,9 +37,11 @@ function App() {
     initQuestion()
     initWrong()
     initExam()
+    initLogs()
+    initSettings()
   }, [])
 
-  const isLoading = authLoading || categoryLoading || questionLoading || wrongLoading || examLoading
+  const isLoading = authLoading || categoryLoading || questionLoading || wrongLoading || examLoading || logLoading || settingsLoading
 
   if (isLoading) {
     return (
@@ -56,6 +65,7 @@ function App() {
           <Route path="exam" element={<Exam />} />
           <Route path="wrong" element={<WrongBook />} />
           <Route path="statistics" element={<Statistics />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
 
         <Route path="/admin/*" element={
@@ -63,6 +73,8 @@ function App() {
         }>
           <Route path="categories" element={<CategoryManage />} />
           <Route path="questions" element={<QuestionManage />} />
+          <Route path="logs" element={<OperationLogs />} />
+          <Route path="backup" element={<BackupManage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

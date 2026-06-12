@@ -212,7 +212,7 @@ export const useQuestionStore = create((set, get) => ({
     return true
   },
 
-  getRandomQuestions: ({ categoryIds, types, count }) => {
+  getRandomQuestions: ({ categoryIds, types, count, shuffle = true }) => {
     let pool = [...get().questions]
 
     if (categoryIds && categoryIds.length > 0) {
@@ -225,7 +225,7 @@ export const useQuestionStore = create((set, get) => ({
 
     pool = pool.filter(q => q.status !== 'disabled')
 
-    const shuffled = pool.sort(() => Math.random() - 0.5)
+    const shuffled = shuffle ? pool.sort(() => Math.random() - 0.5) : pool
     return shuffled.slice(0, Math.min(count, shuffled.length))
   },
 
@@ -269,6 +269,240 @@ export const useQuestionStore = create((set, get) => ({
   clearAllDrafts: async () => {
     await storage.set('questionDrafts', [])
     set({ drafts: [] })
+    return true
+  },
+
+  toggleQuestionStatus: async (id) => {
+    const { questions } = get()
+    const question = questions.find(q => q.id === id)
+    const newStatus = question?.status === 'disabled' ? 'active' : 'disabled'
+    const newQuestions = questions.map(q =>
+      q.id === id ? { ...q, status: newStatus, updatedAt: Date.now() } : q
+    )
+    await storage.set('questions', newQuestions)
+    set({ questions: newQuestions })
+    return newStatus
+  },
+
+  batchToggleStatus: async (ids, targetStatus) => {
+    const { questions } = get()
+    const newQuestions = questions.map(q =>
+      ids.includes(q.id)
+        ? { ...q, status: targetStatus, updatedAt: Date.now() }
+        : q
+    )
+    await storage.set('questions', newQuestions)
+    set({ questions: newQuestions })
+    return true
+  },
+
+  checkDuplicateQuestions: () => {
+    const { questions } = get()
+    const questionMap = new Map()
+    const duplicates = []
+
+    questions.forEach(q => {
+      const normalized = q.question.trim().toLowerCase().replace(/\s+/g, ' ')
+      if (questionMap.has(normalized)) {
+        const existing = questionMap.get(normalized)
+        if (!duplicates.find(d => d.id === existing.id)) {
+          duplicates.push(existing)
+        }
+        duplicates.push(q)
+      } else {
+        questionMap.set(normalized, q)
+      }
+    })
+
+    return duplicates
+  },
+
+  checkQuestionDuplicate: (questionText, excludeId = null) => {
+    const { questions } = get()
+    const normalized = questionText.trim().toLowerCase().replace(/\s+/g, ' ')
+    return questions.find(q => {
+      if (excludeId && q.id === excludeId) return false
+      const qNormalized = q.question.trim().toLowerCase().replace(/\s+/g, ' ')
+      return qNormalized === normalized
+    })
+  },
+
+  exportQuestions: ({ categoryIds, status, format = 'json' } = {}) => {
+    let result = [...get().questions]
+
+    if (categoryIds && categoryIds.length > 0) {
+      result = result.filter(q => categoryIds.includes(q.categoryId))
+    }
+
+    if (status) {
+      result = result.filter(q => q.status === status)
+    }
+
+    const exportData = result.map(({ id, createdAt, updatedAt, ...rest }) => ({
+      ...rest,
+      createdAt: new Date(createdAt).toISOString(),
+      updatedAt: new Date(updatedAt).toISOString()
+    }))
+
+    if (format === 'json') {
+      return JSON.stringify({
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        totalCount: exportData.length,
+        questions: exportData
+      }, null, 2)
+    }
+
+    return exportData
+  },
+
+  importQuestions: async (jsonData, options = {}) => {
+    const { skipDuplicates = true, defaultCategoryId = null } = options
+    const { questions } = get()
+    let parsedData
+
+    try {
+      if (typeof jsonData === 'string') {
+        const parsed = JSON.parse(jsonData)
+        parsedData = parsed.questions || parsed
+      } else {
+        parsedData = jsonData.questions || jsonData
+      }
+    } catch (e) {
+      return { success: false, error: 'JSON 格式解析失败', imported: 0, skipped: 0, duplicates: 0 }
+    }
+
+    if (!Array.isArray(parsedData)) {
+      return { success: false, error: '数据格式不正确，需要题目数组', imported: 0, skipped: 0, duplicates: 0 }
+    }
+
+    const now = Date.now()
+    const existingQuestions = new Set(
+      questions.map(q => q.question.trim().toLowerCase().replace(/\s+/g, ' '))
+    )
+
+    const toImport = []
+    let skipped = 0
+    let duplicates = 0
+    const errors = []
+
+    parsedData.forEach((q, idx) => {
+      if (!q.question || !q.type || !q.options || !q.answer) {
+        errors.push(`第 ${idx + 1} 题：缺少必要字段（题干、类型、选项、答案）`)
+        skipped++
+        return
+      }
+
+      if (!['single', 'multiple', 'judge'].includes(q.type)) {
+        errors.push(`第 ${idx + 1} 题：题目类型无效`)
+        skipped++
+        return
+      }
+
+      const normalized = q.question.trim().toLowerCase().replace(/\s+/g, ' ')
+      if (skipDuplicates && existingQuestions.has(normalized)) {
+        duplicates++
+        skipped++
+        return
+      }
+
+      if (existingQuestions.has(normalized)) {
+        duplicates++
+      }
+
+      toImport.push({
+        id: generateId(),
+        categoryId: q.categoryId || defaultCategoryId,
+        type: q.type,
+        question: q.question.trim(),
+        options: q.options,
+        answer: q.answer,
+        explanation: q.explanation || '',
+        status: q.status || 'active',
+        createdAt: now,
+        updatedAt: now
+      })
+
+      existingQuestions.add(normalized)
+    })
+
+    if (toImport.length > 0) {
+      const newQuestions = [...questions, ...toImport]
+      await storage.set('questions', newQuestions)
+      set({ questions: newQuestions })
+    }
+
+    return {
+      success: true,
+      imported: toImport.length,
+      skipped,
+      duplicates,
+      errors
+    }
+  },
+
+  createBackup: async () => {
+    const questions = get().questions
+    const categories = await storage.get('categories', [])
+    const wrongQuestions = await storage.get('wrongQuestions', [])
+    const examRecords = await storage.get('examRecords', [])
+    const questionDrafts = await storage.get('questionDrafts', [])
+    const operationLogs = await storage.get('operationLogs', [])
+    const userSettings = await storage.get('userSettings', null)
+
+    return {
+      version: '1.0',
+      createdAt: Date.now(),
+      createdAtStr: new Date().toLocaleString('zh-CN'),
+      data: {
+        questions,
+        categories,
+        wrongQuestions,
+        examRecords,
+        questionDrafts,
+        operationLogs,
+        userSettings
+      },
+      stats: {
+        questionCount: questions.length,
+        categoryCount: categories.length,
+        wrongQuestionCount: wrongQuestions.length,
+        examRecordCount: examRecords.length
+      }
+    }
+  },
+
+  restoreBackup: async (backupData, options = {}) => {
+    const { restoreQuestions = true, restoreCategories = true, restoreWrongQuestions = false, restoreExamRecords = false } = options
+
+    const data = backupData.data || backupData
+
+    if (restoreQuestions && data.questions) {
+      await storage.set('questions', data.questions)
+    }
+
+    if (restoreCategories && data.categories) {
+      await storage.set('categories', data.categories)
+    }
+
+    if (restoreWrongQuestions && data.wrongQuestions) {
+      await storage.set('wrongQuestions', data.wrongQuestions)
+    }
+
+    if (restoreExamRecords && data.examRecords) {
+      await storage.set('examRecords', data.examRecords)
+    }
+
+    if (data.questionDrafts) {
+      await storage.set('questionDrafts', data.questionDrafts)
+    }
+
+    return true
+  },
+
+  resetAllQuestions: async () => {
+    await storage.set('questions', defaultQuestions)
+    set({ questions: defaultQuestions })
     return true
   }
 }))

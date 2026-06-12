@@ -1,0 +1,55 @@
+.container {
+  width: 100%;
+}
+
+.card {
+  border-radius: 8px;
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+
+.titleIcon {
+  color: #1890ff;
+  font-size: 20px;
+}
+
+.section {
+  margin-bottom: 24px;
+}
+
+.statCard {
+  text-align: center;
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
+
+.statCard :global(.ant-statistic-title) {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.statCard :global(.ant-statistic-content) {
+  color: #1890ff;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.warningText {
+  color: #ff4d4f;
+  font-weight: 500;
+}
+
+.actionArea {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}

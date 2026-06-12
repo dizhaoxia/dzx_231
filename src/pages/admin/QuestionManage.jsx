@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import {
   Card,
   Button,
@@ -15,7 +15,12 @@ import {
   Form,
   DatePicker,
   Badge,
-  Dropdown
+  Dropdown,
+  Upload,
+  Switch,
+  Tooltip,
+  Alert,
+  List
 } from 'antd'
 import {
   PlusOutlined,
@@ -27,10 +32,17 @@ import {
   FileTextOutlined,
   ClearOutlined,
   MoreOutlined,
-  SwapOutlined
+  SwapOutlined,
+  ImportOutlined,
+  ExportOutlined,
+  ExclamationCircleOutlined,
+  DatabaseOutlined,
+  CheckOutlined,
+  CloseOutlined
 } from '@ant-design/icons'
 import { useCategoryStore } from '../../stores/categoryStore'
 import { useQuestionStore } from '../../stores/questionStore'
+import { useOperationLogStore, LOG_ACTIONS } from '../../stores/operationLogStore'
 import styles from './QuestionManage.module.css'
 
 const { TextArea } = Input
@@ -43,11 +55,12 @@ const questionTypeMap = {
   judge: { label: '判断题', color: 'orange' }
 }
 
-function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCancel, onSaveDraft, drafts }) {
+function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCancel, onSaveDraft, drafts, checkDuplicate }) {
   const [form] = Form.useForm()
   const [qType, setQType] = useState('single')
   const [optionList, setOptionList] = useState(['', '', '', ''])
   const [answerList, setAnswerList] = useState([])
+  const [duplicateWarning, setDuplicateWarning] = useState(null)
 
   React.useEffect(() => {
     if (visible) {
@@ -55,7 +68,8 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
         form.setFieldsValue({
           categoryId: editingQuestion.categoryId,
           question: editingQuestion.question,
-          explanation: editingQuestion.explanation
+          explanation: editingQuestion.explanation,
+          status: editingQuestion.status
         })
         setQType(editingQuestion.type)
         setAnswerList([...(editingQuestion.answer || [])])
@@ -70,14 +84,30 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
       } else {
         form.resetFields()
         form.setFieldsValue({
-          categoryId: categories[0]?.id || null
+          categoryId: categories[0]?.id || null,
+          status: 'active'
         })
         setQType('single')
         setOptionList(['', '', '', ''])
         setAnswerList([])
       }
+      setDuplicateWarning(null)
     }
   }, [visible, editingQuestion, categories, form])
+
+  const handleQuestionChange = (e) => {
+    const value = e.target.value
+    if (value && value.trim()) {
+      const duplicate = checkDuplicate(value.trim(), editingQuestion?.id)
+      if (duplicate) {
+        setDuplicateWarning(duplicate)
+      } else {
+        setDuplicateWarning(null)
+      }
+    } else {
+      setDuplicateWarning(null)
+    }
+  }
 
   const handleTypeChange = (e) => {
     const newType = e.target.value
@@ -116,7 +146,8 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
       options: validOptions,
       answer: answerList,
       explanation: values.explanation?.trim() || '',
-      categoryId: values.categoryId
+      categoryId: values.categoryId,
+      status: values.status || 'active'
     }
   }
 
@@ -144,7 +175,8 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
         options: validOptions,
         answer: answerList,
         explanation: values.explanation.trim(),
-        categoryId: values.categoryId
+        categoryId: values.categoryId,
+        status: values.status || 'active'
       })
     } catch (err) {
       console.error('Validation error:', err)
@@ -276,8 +308,24 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
             { min: 1, message: '题干不能为空' }
           ]}
         >
-          <TextArea rows={3} placeholder="请输入题目内容" maxLength={500} showCount />
+          <TextArea
+            rows={3}
+            placeholder="请输入题目内容"
+            maxLength={500}
+            showCount
+            onChange={handleQuestionChange}
+          />
         </Form.Item>
+
+        {duplicateWarning && (
+          <Alert
+            message="题目重复警告"
+            description={`发现相似题目："${duplicateWarning.question.substring(0, 50)}${duplicateWarning.question.length > 50 ? '...' : ''}"`}
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
 
         <Form.Item label="选项" required>
           {renderOptions()}
@@ -296,6 +344,19 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
           ]}
         >
           <TextArea rows={3} placeholder="请输入答案解析" maxLength={500} showCount />
+        </Form.Item>
+
+        <Form.Item
+          name="status"
+          label="题目状态"
+          valuePropName="checked"
+        >
+          <Switch
+            checkedChildren="启用"
+            unCheckedChildren="禁用"
+            checked={form.getFieldValue('status') !== 'disabled'}
+            onChange={(checked) => form.setFieldsValue({ status: checked ? 'active' : 'disabled' })}
+          />
         </Form.Item>
       </Form>
     </Modal>
@@ -316,9 +377,17 @@ function QuestionManage() {
     saveDraft,
     deleteDraft,
     clearAllDrafts,
-    getDraft
+    getDraft,
+    toggleQuestionStatus,
+    batchToggleStatus,
+    checkDuplicateQuestions,
+    checkQuestionDuplicate,
+    exportQuestions,
+    importQuestions
   } = useQuestionStore()
+  const { addLog } = useOperationLogStore()
 
+  const fileInputRef = useRef(null)
   const [modalVisible, setModalVisible] = useState(false)
   const [editingQuestion, setEditingQuestion] = useState(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState([])
@@ -326,13 +395,18 @@ function QuestionManage() {
   const [searchCategory, setSearchCategory] = useState(null)
   const [searchType, setSearchType] = useState(null)
   const [searchDateRange, setSearchDateRange] = useState(null)
+  const [searchStatus, setSearchStatus] = useState(null)
   const [moveModalVisible, setMoveModalVisible] = useState(false)
   const [moveTargetCategory, setMoveTargetCategory] = useState(null)
   const [draftModalVisible, setDraftModalVisible] = useState(false)
-  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false)
+  const [duplicateModalVisible, setDuplicateModalVisible] = useState(false)
+  const [importModalVisible, setImportModalVisible] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const [importSkipDuplicates, setImportSkipDuplicates] = useState(true)
+  const [importDefaultCategory, setImportDefaultCategory] = useState(null)
 
   const filteredQuestions = useMemo(() => {
-    if (!searchKeyword && !searchCategory && !searchType && !searchDateRange) {
+    if (!searchKeyword && !searchCategory && !searchType && !searchDateRange && !searchStatus) {
       return questions
     }
     return searchQuestions({
@@ -340,9 +414,12 @@ function QuestionManage() {
       type: searchType,
       categoryId: searchCategory,
       startTime: searchDateRange?.[0]?.valueOf(),
-      endTime: searchDateRange?.[1]?.valueOf()
+      endTime: searchDateRange?.[1]?.valueOf(),
+      status: searchStatus
     })
-  }, [questions, searchKeyword, searchCategory, searchType, searchDateRange, searchQuestions])
+  }, [questions, searchKeyword, searchCategory, searchType, searchDateRange, searchStatus, searchQuestions])
+
+  const duplicateQuestions = useMemo(() => checkDuplicateQuestions(), [questions, checkDuplicateQuestions])
 
   const handleAdd = () => {
     setEditingQuestion(null)
@@ -356,15 +433,18 @@ function QuestionManage() {
 
   const handleDelete = async (id) => {
     await deleteQuestion(id)
+    addLog(LOG_ACTIONS.QUESTION_DELETE, { questionId: id })
     message.success('删除成功')
   }
 
   const handleSubmit = async (data) => {
     if (editingQuestion) {
       await updateQuestion(editingQuestion.id, data)
+      addLog(LOG_ACTIONS.QUESTION_EDIT, { questionId: editingQuestion.id })
       message.success('修改成功')
     } else {
-      await addQuestion(data)
+      const q = await addQuestion(data)
+      addLog(LOG_ACTIONS.QUESTION_ADD, { questionId: q.id })
       message.success('添加成功')
     }
     setModalVisible(false)
@@ -417,6 +497,7 @@ function QuestionManage() {
       okButtonProps: { danger: true },
       onOk: async () => {
         await batchDeleteQuestions(selectedRowKeys)
+        addLog(LOG_ACTIONS.QUESTION_BATCH_DELETE, { count: selectedRowKeys.length, ids: selectedRowKeys })
         setSelectedRowKeys([])
         message.success(`已删除 ${selectedRowKeys.length} 道题目`)
       }
@@ -437,10 +518,37 @@ function QuestionManage() {
       return
     }
     await batchMoveCategory(selectedRowKeys, moveTargetCategory)
+    addLog(LOG_ACTIONS.QUESTION_BATCH_MOVE, { count: selectedRowKeys.length, targetCategoryId: moveTargetCategory })
     setSelectedRowKeys([])
     setMoveModalVisible(false)
     setMoveTargetCategory(null)
     message.success('分类迁移成功')
+  }
+
+  const handleToggleStatus = async (record) => {
+    const newStatus = await toggleQuestionStatus(record.id)
+    addLog(LOG_ACTIONS.QUESTION_TOGGLE_STATUS, { questionId: record.id, status: newStatus })
+    message.success(newStatus === 'disabled' ? '已禁用题目' : '已启用题目')
+  }
+
+  const handleBatchEnable = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择题目')
+      return
+    }
+    await batchToggleStatus(selectedRowKeys, 'active')
+    addLog(LOG_ACTIONS.QUESTION_BATCH_TOGGLE_STATUS, { count: selectedRowKeys.length, status: 'active' })
+    message.success(`已启用 ${selectedRowKeys.length} 道题目`)
+  }
+
+  const handleBatchDisable = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择题目')
+      return
+    }
+    await batchToggleStatus(selectedRowKeys, 'disabled')
+    addLog(LOG_ACTIONS.QUESTION_BATCH_TOGGLE_STATUS, { count: selectedRowKeys.length, status: 'disabled' })
+    message.success(`已禁用 ${selectedRowKeys.length} 道题目`)
   }
 
   const handleResetSearch = () => {
@@ -448,6 +556,64 @@ function QuestionManage() {
     setSearchCategory(null)
     setSearchType(null)
     setSearchDateRange(null)
+    setSearchStatus(null)
+  }
+
+  const handleExport = () => {
+    const jsonStr = exportQuestions({
+      categoryIds: searchCategory ? [searchCategory] : null,
+      status: searchStatus
+    })
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `题库导出_${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    addLog(LOG_ACTIONS.QUESTION_EXPORT, { count: filteredQuestions.length })
+    message.success(`已导出 ${filteredQuestions.length} 道题目`)
+  }
+
+  const handleImportClick = () => {
+    setImportResult(null)
+    setImportModalVisible(true)
+  }
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      try {
+        const content = ev.target?.result
+        const result = await importQuestions(content, {
+          skipDuplicates: importSkipDuplicates,
+          defaultCategoryId: importDefaultCategory
+        })
+        setImportResult(result)
+        addLog(LOG_ACTIONS.QUESTION_IMPORT, result)
+        if (result.success) {
+          message.success(`导入完成：成功 ${result.imported} 道，跳过 ${result.skipped} 道，重复 ${result.duplicates} 道`)
+        } else {
+          message.error(result.error || '导入失败')
+        }
+      } catch (err) {
+        message.error('文件读取失败')
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  const handleCheckDuplicates = () => {
+    const duplicates = checkDuplicateQuestions()
+    addLog(LOG_ACTIONS.QUESTION_DUPLICATE_CHECK, { count: duplicates.length })
+    setDuplicateModalVisible(true)
+    if (duplicates.length === 0) {
+      message.success('未发现重复题目')
+    } else {
+      message.warning(`发现 ${Math.ceil(duplicates.length / 2)} 组重复题目`)
+    }
   }
 
   const hasSelected = selectedRowKeys.length > 0
@@ -490,11 +656,17 @@ function QuestionManage() {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 80,
-      render: (status) => (
-        <Tag color={status === 'disabled' ? 'default' : 'green'}>
-          {status === 'disabled' ? '已禁用' : '正常'}
-        </Tag>
+      width: 100,
+      render: (status, record) => (
+        <Tooltip title={status === 'disabled' ? '点击启用' : '点击禁用'}>
+          <Tag
+            color={status === 'disabled' ? 'default' : 'green'}
+            style={{ cursor: 'pointer' }}
+            onClick={() => handleToggleStatus(record)}
+          >
+            {status === 'disabled' ? '已禁用' : '正常'}
+          </Tag>
+        </Tooltip>
       )
     },
     {
@@ -507,11 +679,18 @@ function QuestionManage() {
     {
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 200,
       render: (_, record) => (
         <Space size="middle">
           <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
             编辑
+          </Button>
+          <Button
+            type="link"
+            icon={record.status === 'disabled' ? <CheckOutlined /> : <CloseOutlined />}
+            onClick={() => handleToggleStatus(record)}
+          >
+            {record.status === 'disabled' ? '启用' : '禁用'}
           </Button>
           <Popconfirm
             title="确定要删除这道题目吗？"
@@ -526,6 +705,37 @@ function QuestionManage() {
     }
   ]
 
+  const batchMenuItems = {
+    items: [
+      {
+        key: 'enable',
+        label: '批量启用',
+        icon: <CheckOutlined />,
+        onClick: handleBatchEnable
+      },
+      {
+        key: 'disable',
+        label: '批量禁用',
+        icon: <CloseOutlined />,
+        onClick: handleBatchDisable
+      },
+      { type: 'divider' },
+      {
+        key: 'delete',
+        label: '批量删除',
+        icon: <DeleteOutlined />,
+        danger: true,
+        onClick: handleBatchDelete
+      },
+      {
+        key: 'move',
+        label: '批量迁移分类',
+        icon: <SwapOutlined />,
+        onClick: handleBatchMove
+      }
+    ]
+  }
+
   return (
     <div className={styles.container}>
       <Card
@@ -536,7 +746,7 @@ function QuestionManage() {
           </span>
         }
         extra={
-          <Space>
+          <Space wrap>
             {drafts.length > 0 && (
               <Badge count={drafts.length} size="small">
                 <Button
@@ -547,6 +757,27 @@ function QuestionManage() {
                 </Button>
               </Badge>
             )}
+            <Button
+              icon={<ExclamationCircleOutlined />}
+              onClick={handleCheckDuplicates}
+            >
+              重复校验
+              {duplicateQuestions.length > 0 && (
+                <Badge count={Math.ceil(duplicateQuestions.length / 2)} size="small" style={{ marginLeft: 4 }} />
+              )}
+            </Button>
+            <Button
+              icon={<ImportOutlined />}
+              onClick={handleImportClick}
+            >
+              导入题库
+            </Button>
+            <Button
+              icon={<ExportOutlined />}
+              onClick={handleExport}
+            >
+              导出题库
+            </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
               新增题目
             </Button>
@@ -586,6 +817,16 @@ function QuestionManage() {
               <Option value="multiple">多选题</Option>
               <Option value="judge">判断题</Option>
             </Select>
+            <Select
+              placeholder="选择状态"
+              style={{ width: 120 }}
+              allowClear
+              value={searchStatus}
+              onChange={setSearchStatus}
+            >
+              <Option value="active">正常</Option>
+              <Option value="disabled">已禁用</Option>
+            </Select>
             <RangePicker
               placeholder={['开始日期', '结束日期']}
               value={searchDateRange}
@@ -603,21 +844,11 @@ function QuestionManage() {
           <div className={styles.batchBar}>
             <Space>
               <span>已选择 {selectedRowKeys.length} 项</span>
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                onClick={handleBatchDelete}
-                size="small"
-              >
-                批量删除
-              </Button>
-              <Button
-                icon={<SwapOutlined />}
-                onClick={handleBatchMove}
-                size="small"
-              >
-                批量迁移分类
-              </Button>
+              <Dropdown menu={batchMenuItems}>
+                <Button type="primary" size="small">
+                  批量操作 <MoreOutlined />
+                </Button>
+              </Dropdown>
               <Button
                 type="link"
                 onClick={() => setSelectedRowKeys([])}
@@ -654,6 +885,7 @@ function QuestionManage() {
         onCancel={() => setModalVisible(false)}
         onSaveDraft={handleSaveDraft}
         drafts={drafts}
+        checkDuplicate={checkQuestionDuplicate}
       />
 
       <Modal
@@ -740,6 +972,164 @@ function QuestionManage() {
               </div>
             ))}
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={
+          <span>
+            <ExclamationCircleOutlined style={{ color: '#faad14', marginRight: 8 }} />
+            重复题目检测结果
+          </span>
+        }
+        open={duplicateModalVisible}
+        onCancel={() => setDuplicateModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setDuplicateModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={700}
+      >
+        {duplicateQuestions.length === 0 ? (
+          <Alert
+            message="检测通过"
+            description="未发现重复题目，题库质量良好！"
+            type="success"
+            showIcon
+            icon={<CheckOutlined />}
+          />
+        ) : (
+          <div>
+            <Alert
+              message={`发现 ${Math.ceil(duplicateQuestions.length / 2)} 组重复题目`}
+              description="以下题干内容高度相似，建议合并或删除重复项"
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+            <List
+              dataSource={duplicateQuestions}
+              renderItem={(item) => {
+                const category = categories.find(c => c.id === item.categoryId)
+                return (
+                  <List.Item
+                    actions={[
+                      <Button type="link" size="small" onClick={() => { handleEdit(item); setDuplicateModalVisible(false) }}>
+                        编辑
+                      </Button>
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={<Tag color={questionTypeMap[item.type]?.color}>{questionTypeMap[item.type]?.label}</Tag>}
+                      title={item.question}
+                      description={
+                        <Space>
+                          <Tag color="blue">{category?.name || '未分类'}</Tag>
+                          <span style={{ color: '#999' }}>
+                            创建于 {new Date(item.createdAt).toLocaleString('zh-CN')}
+                          </span>
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )
+              }}
+            />
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={
+          <span>
+            <DatabaseOutlined style={{ marginRight: 8 }} />
+            导入题库
+          </span>
+        }
+        open={importModalVisible}
+        onCancel={() => { setImportModalVisible(false); setImportResult(null) }}
+        footer={[
+          <Button key="close" onClick={() => { setImportModalVisible(false); setImportResult(null) }}>
+            关闭
+          </Button>
+        ]}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Alert
+            message="导入说明"
+            description="支持 JSON 格式题库文件，可选择是否跳过重复题目。"
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+          <Form layout="vertical">
+            <Form.Item label="默认分类（导入题目无分类时使用）">
+              <Select
+                placeholder="请选择分类"
+                allowClear
+                style={{ width: '100%' }}
+                value={importDefaultCategory}
+                onChange={setImportDefaultCategory}
+              >
+                {categories.map(cat => (
+                  <Option key={cat.id} value={cat.id}>{cat.name}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item label="导入选项">
+              <Checkbox
+                checked={importSkipDuplicates}
+                onChange={e => setImportSkipDuplicates(e.target.checked)}
+              >
+                跳过重复题目（题干相同视为重复）
+              </Checkbox>
+            </Form.Item>
+            <Form.Item label="选择文件">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".json"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+              />
+              <Button
+                icon={<ImportOutlined />}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                选择 JSON 文件
+              </Button>
+            </Form.Item>
+          </Form>
+        </div>
+
+        {importResult && (
+          <Alert
+            type={importResult.success ? 'success' : 'error'}
+            showIcon
+            message={importResult.success ? '导入完成' : '导入失败'}
+            description={
+              importResult.success ? (
+                <div>
+                  <p>成功导入：<strong>{importResult.imported}</strong> 道</p>
+                  <p>跳过：<strong>{importResult.skipped}</strong> 道</p>
+                  <p>检测到重复：<strong>{importResult.duplicates}</strong> 道</p>
+                  {importResult.errors && importResult.errors.length > 0 && (
+                    <div>
+                      <p>错误详情：</p>
+                      <ul style={{ maxHeight: 120, overflow: 'auto' }}>
+                        {importResult.errors.map((err, idx) => (
+                          <li key={idx} style={{ color: '#ff4d4f' }}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : importResult.error
+            }
+            style={{ marginTop: 16 }}
+          />
         )}
       </Modal>
     </div>
