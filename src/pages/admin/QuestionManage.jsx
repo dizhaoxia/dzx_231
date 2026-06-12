@@ -40,8 +40,9 @@ function QuestionForm({ form, categories, modalVisible }) {
 
   const handleOptionChange = (index, value) => {
     const currentOptions = form.getFieldValue('options') || []
-    currentOptions[index] = value
-    form.setFieldsValue({ options: currentOptions })
+    const newOptions = [...currentOptions]
+    newOptions[index] = value
+    form.setFieldsValue({ options: newOptions })
   }
 
   const handleTypeChange = (e) => {

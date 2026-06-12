@@ -52,6 +52,7 @@ function AdminLayout() {
         </div>
         <Menu
           mode="inline"
+          theme="dark"
           selectedKeys={[getSelectedKey()]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
