@@ -169,9 +169,16 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
         return
       }
 
+      const questionText = values.question.trim()
+      const duplicate = checkDuplicate(questionText, editingQuestion?.id)
+      if (duplicate) {
+        message.error('题目已存在，请修改题干内容后再提交')
+        return
+      }
+
       onOk({
         type: qType,
-        question: values.question.trim(),
+        question: questionText,
         options: validOptions,
         answer: answerList,
         explanation: values.explanation.trim(),
@@ -349,14 +356,11 @@ function QuestionFormModal({ visible, editingQuestion, categories, onOk, onCance
         <Form.Item
           name="status"
           label="题目状态"
-          valuePropName="checked"
         >
-          <Switch
-            checkedChildren="启用"
-            unCheckedChildren="禁用"
-            checked={form.getFieldValue('status') !== 'disabled'}
-            onChange={(checked) => form.setFieldsValue({ status: checked ? 'active' : 'disabled' })}
-          />
+          <Select>
+            <Option value="active">启用</Option>
+            <Option value="disabled">禁用</Option>
+          </Select>
         </Form.Item>
       </Form>
     </Modal>

@@ -144,7 +144,7 @@ export const useQuestionStore = create((set, get) => ({
     }
 
     if (status) {
-      result = result.filter(q => q.status === status)
+      result = result.filter(q => (q.status || 'active') === status)
     }
 
     return result
@@ -335,13 +335,13 @@ export const useQuestionStore = create((set, get) => ({
     }
 
     if (status) {
-      result = result.filter(q => q.status === status)
+      result = result.filter(q => (q.status || 'active') === status)
     }
 
     const exportData = result.map(({ id, createdAt, updatedAt, ...rest }) => ({
       ...rest,
-      createdAt: new Date(createdAt).toISOString(),
-      updatedAt: new Date(updatedAt).toISOString()
+      createdAt: createdAt ? new Date(createdAt).toISOString() : null,
+      updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null
     }))
 
     if (format === 'json') {
